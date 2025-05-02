@@ -1,0 +1,32 @@
+{
+  "name": "@cathodique/de",
+  "version": "1.0.1",
+  "description": "Cathodique Desktop Environment",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "tsc && LOGGERS=wl_serv_i8a56qb0lm3ox1ng1cqai0e1 electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cathodique/de.git"
+  },
+  "author": "Juliet WANG <immjs>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cathodique/de/issues"
+  },
+  "homepage": "https://github.com/cathodique/de#readme",
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/electron": "^1.4.38",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@cathodique/mmap-io": "^1.5.5",
+    "@cathodique/wayland-server-js-impl": "^1.0.13",
+    "@paralleldrive/cuid2": "^2.2.2",
+    "electron": "^33.2.1"
+  }
+}
