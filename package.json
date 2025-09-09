@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "start": "tsc && LOGGERS=wl_serv_i8a56qb0lm3ox1ng1cqai0e1 electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc && cp -frfr assets/* dist/"
   },
   "repository": {
     "type": "git",
@@ -24,9 +25,15 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "@cathodique/mmap-io": "^1.5.5",
-    "@cathodique/wayland-server-js-impl": "^1.0.13",
+    "@cathodique/mmap-io": "file:../mmap-io",
+    "@cathodique/wl-serv-high": "file:../wl-serv-high",
     "@paralleldrive/cuid2": "^2.2.2",
-    "electron": "^33.2.1"
+    "electron": "35.6",
+    "koffi": "^2.14.0",
+    "node-abi": "^4.12.0",
+    "xml-parser": "^1.2.1"
+  },
+  "overrides": {
+    "nan": "^2.23.0"
   }
 }

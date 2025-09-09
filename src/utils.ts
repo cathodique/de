@@ -1,4 +1,4 @@
-import { InstructionType, RegRectangle } from "@cathodique/wayland-server-js-impl/dist/objects/wl_region";
+import { InstructionType, RegRectangle } from "@cathodique/wl-serv-high/dist/objects/wl_region";
 
 export function isInRegion(reg: RegRectangle[], y: number, x: number) {
   return reg.reduce<InstructionType | null>((a, v) => {
