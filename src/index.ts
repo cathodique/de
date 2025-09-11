@@ -17,6 +17,7 @@ import { ipcRenderer } from "electron";
 
 import { codeToScan } from "./codeToScancode";
 import { WlBuffer } from "@cathodique/wl-serv-high/dist/objects/wl_buffer";
+import { WlSubsurface } from "@cathodique/wl-serv-high/dist/objects/wl_subsurface";
 // import { WlPointer } from "@cathodique/wl-serv-high/dist/objects/wl_pointer";
 
 // HERE
@@ -91,7 +92,7 @@ document.body.addEventListener("keyup", (v) => {
 
   const scancode = codeToScan[v.code];
 
-  if (currentSeat) surf.emit("modifier", currentSeat, 0, 0, 0, 0);
+  if (currentSeat) surf.emit("modifiers", currentSeat, 0, 0, 0, 0);
   if (currentSeat) surf.emit("keyUp", currentSeat, scancode);
 });
 
@@ -104,26 +105,85 @@ compo.on("connection", (c) => {
 
   // const myOutputTransport = outputReg.transports.get(c)!.get(myOutput)!;
 
-  c.on("new_obj", async (surf: BaseObject) => {
-    if (surf instanceof WlSeat) {
-      currentSeat = surf.authority.config;
+  c.on("new_obj", async (obj: BaseObject) => {
+    if (obj instanceof WlSeat) {
+      currentSeat = obj.authority.config;
       if (currentSurface) currentSurface = [currentSurface[0], currentSeat];
       return;
     }
+    if (obj instanceof WlSubsurface) {
+      const parentDom = surfaceToDom.get(obj.assocParent)!;
 
-    if (!(surf instanceof WlSurface)) return;
+      parentDom.append(surfaceToDom.get(obj.assocSurface)!);
+
+      // Subsurface shenanigans
+      // TODO: Apply on commit
+      obj.on("wlPlaceAbove", function (this: WlSubsurface, { sibling: other }: { sibling: WlSurface }) {
+        switch (this.getRelationWith(other)) {
+          case "sibling": {
+            const siblingDom = surfaceToDom.get(other)!;
+            const parentDom = siblingDom.parentElement!;
+
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom.nextSibling);
+            break;
+          }
+          case "parent": {
+            const parentDom = surfaceToDom.get(other)!;
+
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentDom.querySelector('canvas')!.nextSibling);
+            break;
+          }
+          default:
+          // Already handled by wl-serv-high
+        }
+      });
+
+      obj.on("wlPlaceBelow", function (this: WlSubsurface, { sibling: other }: { sibling: WlSurface }) {
+        switch (this.getRelationWith(other)) {
+          case "sibling": {
+            const siblingDom = surfaceToDom.get(other)!;
+            const parentDom = siblingDom.parentElement!;
+
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom);
+            break;
+          }
+          case "parent": {
+            const parentDom = surfaceToDom.get(other)!;
+
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentDom.querySelector('canvas'));
+            break;
+          }
+          default:
+          // Already handled by wl-serv-high
+        }
+      });
+      obj.on('wlSetPosition', function (this: WlSubsurface, { y, x }: { y: number, x: number }) {
+        const thisDom = surfaceToDom.get(this.assocSurface)!;
+
+        thisDom.style.top = `${y}px`;
+        thisDom.style.left = `${x}px`;
+      });
+    }
+
+    if (!(obj instanceof WlSurface)) return;
 
     // console.log(surf);
     // const awaitCommit = () => new Promise<WlBuffer>((r) => surf.once('wlCommit', () => r()));
     const container = document.createElement("div") as HTMLDivElement;
-    container.classList.add("window");
+    container.classList.add("surface-container");
 
     container.style.display = "none";
 
     const canvas = document.createElement("canvas") as HTMLCanvasElement;
-    canvas.classList.add("contents");
+    canvas.classList.add("surface-contents");
 
-    surfaceToDom.set(surf, container);
+    // FPS element
+    // const fpsEl = document.createElement('p');
+    let lastNow = 0;
+
+    container.append(canvas);
+
+    surfaceToDom.set(obj, container);
 
     const ctx = canvas.getContext("2d");
     if (!ctx)
@@ -135,61 +195,73 @@ compo.on("connection", (c) => {
 
     let wasInSurface = false;
 
-    surf.on("updateRole", () => {
-      switch (surf.role) {
+    obj.on("updateRole", () => {
+      switch (obj.role) {
         case "cursor":
           break;
         case "toplevel":
           document.body.append(container);
-          break
+          container.classList.add("xdg-toplevel");
+          break;
         case "popup":
           document.body.append(container);
+          container.classList.add("xdg-popup");
+          break;
+        case "subsurface":
+          container.classList.add("subsurface");
           break;
       }
     });
 
-    let mouseMoved = 0;
+    // let mouseMoved = 0;
     const move = function (evt: MouseEvent, forceLeave?: boolean) {
+      if (!currentSeat) return;
+
+      (evt.target as HTMLElement).style.outline = '#f00 solid 2px';
+
       // console.log(surf);
-      (surf.xdgSurface?.parent as XdgWmBase)?.addCommand("ping", {
-        serial: surf.connection.time.getTime(),
+      (obj.xdgSurface?.parent as XdgWmBase)?.addCommand("ping", {
+        serial: obj.connection.time.getTime(),
       });
 
-      if (mouseMoved % 100 === 9) console.log("mouse moved");
-      mouseMoved += 1;
+      const containerPos = container.getBoundingClientRect();
+
+      const mouseY = evt.clientY - containerPos.top;
+      const mouseX = evt.clientX - containerPos.left;
+
+      if (evt.target !== container && evt.target !== canvas) return; // I give up on this shit wtf.
+
+      // if (mouseMoved % 100 === 9) console.log("mouse moved");
+      // mouseMoved += 1;
 
       if (
         !forceLeave ||
-        (surf.inputRegions.current.length &&
-          isInRegion(surf.inputRegions.current, evt.offsetY, evt.offsetX))
+        (obj.inputRegions.current.length &&
+          isInRegion(obj.inputRegions.current, evt.offsetY, mouseX))
       ) {
         if (!wasInSurface) {
           wasInSurface = true;
-          currentSurface = [surf, currentSeat];
+          currentSurface = [obj, currentSeat];
           // console.log('enter');
-          if (currentSeat) {
-            surf.emit("focus", currentSeat, []);
-            surf.emit("enter", currentSeat, evt.offsetX, evt.offsetY);
-          }
+          obj.emit("focus", currentSeat, []);
+          obj.emit("enter", currentSeat, mouseX, mouseY);
         }
         // console.log('move', evt.offsetX, evt.offsetY);
-        if (currentSeat) {
-          surf.emit("moveTo", currentSeat, evt.offsetX, evt.offsetY);
-        }
+        obj.emit("moveTo", currentSeat, mouseX, mouseY);
       } else {
+        (evt.target as HTMLElement).style.outline = 'unset';
+
         wasInSurface = false;
         currentSurface = null;
         // console.log('leave');
-        if (currentSeat) {
-          surf.emit("blur", currentSeat);
-          surf.emit("leave", currentSeat);
-        }
+        obj.emit("blur", currentSeat);
+        obj.emit("leave", currentSeat);
       }
     };
 
-    container.addEventListener("mouseenter", move);
+    container.addEventListener("mouseover", move);
     container.addEventListener("mousemove", move);
-    container.addEventListener("mouseleave", (v) => move(v, true));
+    container.addEventListener("mouseout", (v) => move(v, true));
     const webToButtonMap: Record<string, number> = {
       0: 0x110,
       1: 0x112,
@@ -200,22 +272,36 @@ compo.on("connection", (c) => {
     container.addEventListener("mousedown", (evt) => {
       // console.log('down', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
-        surf.emit("buttonDown", currentSeat, webToButtonMap[evt.button]);
+        obj.emit("buttonDown", currentSeat, webToButtonMap[evt.button]);
     });
     container.addEventListener("mouseup", (evt) => {
       // console.log('up', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
-        surf.emit("buttonUp", currentSeat, webToButtonMap[evt.button]);
+        obj.emit("buttonUp", currentSeat, webToButtonMap[evt.button]);
     });
+
+    let wasShown = false;
 
     let lastDimensions: [number, number] = [-Infinity, -Infinity];
     const commitHandler = async function () {
-      const b = surf.buffer.current;
+      // console.log(obj);
 
-      if (b == null) {
-        container.style.display = "none";
-        return;
+      const b = obj.buffer.current;
+
+      const now = Date.now();
+      const fps = 1 / ((now - lastNow) / 1000);
+      console.log(`${fps}Hz`);
+      lastNow = now;
+
+      if (b === null) container.style.display = "none";
+      if (b == null) return;
+
+      // TODO: Make shown state within each wlsurface
+      if (!wasShown) {
+        wasShown = true;
+        obj.emit("shown", myOutput);
       }
+
       container.style.display = "block";
       if (lastDimensions[0] !== b.height || lastDimensions[1] !== b.width) {
         container.style.width = `${b.width}px`;
@@ -225,7 +311,9 @@ compo.on("connection", (c) => {
         lastDimensions = [b.height, b.width];
       }
 
-      const currlyDamagedBuffer = surf.getCurrlyDammagedBuffer();
+      canvas.style.transform = `translate(${obj.offset.current[1]}px, ${obj.offset.current[0]}px)`;
+
+      const currlyDamagedBuffer = obj.getCurrlyDammagedBuffer();
 
       for (const rect of currlyDamagedBuffer) {
         b.updateBufferArea(rect.y, rect.x, rect.h, rect.w)
@@ -251,23 +339,12 @@ compo.on("connection", (c) => {
     };
 
     commitHandler();
-    surf.on("update", () => commitHandler());
+    obj.on("update", () => commitHandler());
 
-    surf.once("wlCommit", () => {
-      surf.emit("shown", myOutput);
-    });
-
-    surf.once("wlDestroy", () => {
-      surf.off("update", commitHandler);
+    obj.once("beforeWlDestroy", () => {
       // Unsure vvv
       container.remove();
     });
-
-
-    // Subsurface shenanigans
-    // surf.on("wlPlaceAbove", () => {
-    //   if ()
-    // });
   });
 });
 compo.start();
