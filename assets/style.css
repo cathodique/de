@@ -9,3 +9,11 @@
 .surface-container > .surface-contents {
     filter: url(littleEndianFix.svg#svgfm-filter);
 }
+
+.crop-container {
+    overflow: hidden;
+}
+
+.window-window .window, .window-window .window-body {
+    width: fit-content;
+}

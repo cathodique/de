@@ -1,23 +1,19 @@
-import { HLCompositor } from "@cathodique/wl-serv-high";
+import { HLCompositor, HLConnection } from "@cathodique/wl-serv-high";
 import {
   InstructionType,
   RegRectangle,
 } from "@cathodique/wl-serv-high/dist/objects/wl_region";
-import { SeatConfiguration, WlSeat } from "@cathodique/wl-serv-high/dist/objects/wl_seat";
+import { SeatAuthority, SeatConfiguration, WlSeat } from "@cathodique/wl-serv-high/dist/objects/wl_seat";
 import { KeyboardRegistry } from "@cathodique/wl-serv-high/dist/objects/wl_keyboard";
 import { BaseObject } from "@cathodique/wl-serv-high/dist/objects/base_object";
 import { WlSurface } from "@cathodique/wl-serv-high/dist/objects/wl_surface";
-import {
-  WlOutput,
-  OutputConfiguration,
-} from "@cathodique/wl-serv-high/dist/objects/wl_output";
-
 import { XdgWmBase } from "@cathodique/wl-serv-high/dist/objects/xdg_wm_base";
 import { ipcRenderer } from "electron";
 
 import { codeToScan } from "./codeToScancode";
-import { WlBuffer } from "@cathodique/wl-serv-high/dist/objects/wl_buffer";
 import { WlSubsurface } from "@cathodique/wl-serv-high/dist/objects/wl_subsurface";
+import { XdgToplevel } from "@cathodique/wl-serv-high/dist/objects/xdg_toplevel";
+import { WindowGeometry, XdgSurface } from "@cathodique/wl-serv-high/dist/objects/xdg_surface";
 // import { WlPointer } from "@cathodique/wl-serv-high/dist/objects/wl_pointer";
 
 // HERE
@@ -25,19 +21,96 @@ import { WlSubsurface } from "@cathodique/wl-serv-high/dist/objects/wl_subsurfac
 // Direct events towards their respective authorities
 // for both Seat and Output
 
-export function isInRegion(reg: RegRectangle[], y: number, x: number) {
+export function isInRegion(reg: RegRectangle[], y: number, x: number, defaultValue: boolean = false) {
+  if (reg.length === 0) return defaultValue;
+
   return (
     reg.reduce<InstructionType | null>((a, v) => {
-      if (!v.hasCoordinate(y, x)) return a;
-      return v.type;
+      if (v.hasCoordinate(y, x)) return v.type;
+      return a;
     }, null) === InstructionType.Add
   );
+}
+
+const knownMods = ["Shift", "Lock", "Control", "Mod1", "Mod2", "Mod3", "Mod4", "Mod5"] as const;
+class Modifiers {
+  depressed = Object.fromEntries(knownMods.map((v) => [v, false])) as Record<typeof knownMods[number], boolean>;
+  depressedBitmask = 0;
+  latched = Object.fromEntries(knownMods.map((v) => [v, false])) as Record<typeof knownMods[number], boolean>;
+  latchedBitmask = 0;
+  locked = Object.fromEntries(knownMods.map((v) => [v, false])) as Record<typeof knownMods[number], boolean>;
+  lockedBitmask = 0;
+
+  group = 0;
+
+  seatConfig: SeatConfiguration;
+
+  constructor(seatConfig: SeatConfiguration) {
+    this.seatConfig = seatConfig;
+  }
+
+  updateAccordingly(evt: KeyboardEvent | MouseEvent) {
+    let changed = { depressed: false, latched: false, locked: false };
+    function checkIfChangedAndUpdate(origin: Record<typeof knownMods[number], boolean>, modifier: typeof knownMods[number], value: boolean) {
+      if (origin[modifier] === value) return false;
+      origin[modifier] = value;
+      return true;
+    }
+    // Shift: "Shift"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Shift", evt.getModifierState("Shift"));
+    // Lock: "CapsLock"
+    changed.locked ||= checkIfChangedAndUpdate(this.locked, "Lock", evt.getModifierState("CapsLock"));
+    if (evt instanceof KeyboardEvent) changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Lock", evt.type === "keydown" && evt.key === "CapsLock");
+    // Control: "Control"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Control", evt.getModifierState("Control"));
+    // Mod1: "Alt"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Mod1", evt.getModifierState("Alt"));
+    // Mod2: "NumLock"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Mod2", evt.getModifierState("NumLock"));
+    // Mod3: "Hyper" (No Level 5 in browser spec)
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Mod3", evt.getModifierState("Hyper"));
+    // Mod4: "Meta"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Mod4", evt.getModifierState("Meta"));
+    // Mod5: "AltGraph"
+    changed.depressed ||= checkIfChangedAndUpdate(this.depressed, "Mod5", evt.getModifierState("AltGraph"));
+
+    return changed;
+  }
+
+  static createMask(object: Record<typeof knownMods[number], boolean>) {
+    let result = 0;
+    for (let modIdx = 0; modIdx < knownMods.length; modIdx += 1) {
+      const mask = 2 ** modIdx;
+      if (object[knownMods[modIdx]]) result += mask;
+    }
+
+    return result;
+  }
+
+  update(connection: HLConnection, serial?: number) {
+    const authority = connection.display.seatAuthorities.get(this.seatConfig)!;
+
+    authority.modifiers(this.depressedBitmask, this.latchedBitmask, this.lockedBitmask, this.group, serial);
+  }
+
+  ifUpdateThenEmit(evt: KeyboardEvent | MouseEvent, connection: HLConnection) {
+    const xWasUpdated = this.updateAccordingly(evt);
+    if (xWasUpdated.depressed || xWasUpdated.latched || xWasUpdated.locked) {
+      if (xWasUpdated.depressed)  this.depressedBitmask = Modifiers.createMask(this.depressed);
+      if (xWasUpdated.latched)    this.latchedBitmask   = Modifiers.createMask(this.latched);
+      if (xWasUpdated.locked)     this.lockedBitmask    = Modifiers.createMask(this.locked);
+
+      this.update(connection);
+    }
+  }
 }
 
 const mySeat = {
   name: "seat0",
   capabilities: 3,
+  modifiers: null as unknown as Modifiers,
 };
+mySeat.modifiers = new Modifiers(mySeat);
 // const seatReg = new SeatRegistry([mySeat]);
 
 const myOutput = {
@@ -60,17 +133,25 @@ const compo = new HLCompositor({
   wl_keyboard: new KeyboardRegistry({ keymap: "us" }),
 });
 
-setInterval(() => compo.ticks.emit("tick"), 1000 / 60);
+const tickAnimationFrame = () => {
+  compo.ticks.emit("tick");
+  requestAnimationFrame(tickAnimationFrame);
+};
+tickAnimationFrame();
 
 const surfaceToDom = new Map<WlSurface, HTMLDivElement>();
 
-let currentSurface: [WlSurface, SeatConfiguration?] | null = null;
+let currentSeat: SeatAuthority | undefined = undefined;
 // WTF!!
 // let currentKeyboards: Map<HLConnection, WlKeyboard> = new Map();
 
 document.body.addEventListener("keydown", (v) => {
-  if (!currentSurface) return;
-  const [surf, currentSeat] = currentSurface;
+  if (!currentSeat) {
+    mySeat.modifiers.updateAccordingly(v);
+    return;
+  }
+  v.preventDefault();
+  mySeat.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
 
   const isInMap = (code: string): code is keyof typeof codeToScan =>
     code in codeToScan;
@@ -78,13 +159,17 @@ document.body.addEventListener("keydown", (v) => {
 
   const scancode = codeToScan[v.code];
 
-  if (currentSeat) surf.emit("modifier", currentSeat, 0, 0, 0, 0);
-  if (currentSeat) surf.emit("keyDown", currentSeat, scancode);
+  // if (currentSeat) surf.modifiers(currentSeat, 0, 0, 0, 0);
+  currentSeat.keyDown(scancode);
 });
 
 document.body.addEventListener("keyup", (v) => {
-  if (!currentSurface) return;
-  const [surf, currentSeat] = currentSurface;
+  if (!currentSeat) {
+    mySeat.modifiers.updateAccordingly(v);
+    return;
+  }
+  v.preventDefault();
+  mySeat.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
 
   const isInMap = (code: string): code is keyof typeof codeToScan =>
     code in codeToScan;
@@ -92,8 +177,8 @@ document.body.addEventListener("keyup", (v) => {
 
   const scancode = codeToScan[v.code];
 
-  if (currentSeat) surf.emit("modifiers", currentSeat, 0, 0, 0, 0);
-  if (currentSeat) surf.emit("keyUp", currentSeat, scancode);
+  // if (currentSeat) surf.modifiers(currentSeat, 0, 0, 0, 0);
+  currentSeat.keyUp(scancode);
 });
 
 compo.on("connection", (c) => {
@@ -101,20 +186,17 @@ compo.on("connection", (c) => {
 
   // let currentKeyboard: WlKeyboard | undefined;
   // let currentPointer: WlPointer | undefined;
-  let currentSeat: SeatConfiguration | undefined;
-
   // const myOutputTransport = outputReg.transports.get(c)!.get(myOutput)!;
 
   c.on("new_obj", async (obj: BaseObject) => {
     if (obj instanceof WlSeat) {
-      currentSeat = obj.authority.config;
-      if (currentSurface) currentSurface = [currentSurface[0], currentSeat];
+      currentSeat = obj.authority;
       return;
     }
     if (obj instanceof WlSubsurface) {
       const parentDom = surfaceToDom.get(obj.assocParent)!;
 
-      parentDom.append(surfaceToDom.get(obj.assocSurface)!);
+      parentDom.prepend(surfaceToDom.get(obj.assocSurface)!);
 
       // Subsurface shenanigans
       // TODO: Apply on commit
@@ -124,13 +206,14 @@ compo.on("connection", (c) => {
             const siblingDom = surfaceToDom.get(other)!;
             const parentDom = siblingDom.parentElement!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom.nextSibling);
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom);
             break;
           }
           case "parent": {
             const parentDom = surfaceToDom.get(other)!;
+            const parentCanvas = Array.from(parentDom.children).find((v) => v.tagName === 'canvas')!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentDom.querySelector('canvas')!.nextSibling);
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentCanvas);
             break;
           }
           default:
@@ -144,13 +227,14 @@ compo.on("connection", (c) => {
             const siblingDom = surfaceToDom.get(other)!;
             const parentDom = siblingDom.parentElement!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom);
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom.nextSibling);
             break;
           }
           case "parent": {
             const parentDom = surfaceToDom.get(other)!;
+            const parentCanvas = Array.from(parentDom.children).find((v) => v.tagName === 'canvas')!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentDom.querySelector('canvas'));
+            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentCanvas.nextSibling);
             break;
           }
           default:
@@ -179,7 +263,8 @@ compo.on("connection", (c) => {
 
     // FPS element
     // const fpsEl = document.createElement('p');
-    let lastNow = 0;
+    // let lastFrameTimes = [1];
+    // let lastNow = Date.now();
 
     container.append(canvas);
 
@@ -200,7 +285,34 @@ compo.on("connection", (c) => {
         case "cursor":
           break;
         case "toplevel":
-          document.body.append(container);
+          const titleTextNode = document.createTextNode('Window');
+
+          const toplevel = obj.xdgSurface!.role as XdgToplevel;
+
+          const windowTemplate = document.querySelector('template#window')! as HTMLTemplateElement;
+          const clone = windowTemplate.content.cloneNode(true) as DocumentFragment;
+
+          const cropContainer = document.createElement('div');
+          cropContainer.classList.add('crop-container');
+          cropContainer.append(container);
+
+          const windowGeometryDoubleBuff = (toplevel.parent as XdgSurface).geometry;
+          function applyWindowGeometry(windowGeometry: WindowGeometry) {
+            cropContainer.style.height = `${windowGeometry.height}px`;
+            cropContainer.style.width = `${windowGeometry.width}px`;
+            container.style.top = `-${windowGeometry.y}px`;
+            container.style.left = `-${windowGeometry.x}px`;
+          }
+          applyWindowGeometry(windowGeometryDoubleBuff.current);
+          windowGeometryDoubleBuff.on('current', applyWindowGeometry);
+
+          clone.querySelector('slot[name=window_title]')!.replaceWith(titleTextNode);
+          clone.querySelector('slot[name=window_contents]')!.replaceWith(cropContainer);
+
+          titleTextNode.textContent = toplevel.title || 'Untitled window';
+          toplevel.on('wlSetTitle', (v) => titleTextNode.textContent = toplevel.title || 'Untitled window');
+
+          document.body.append(clone);
           container.classList.add("xdg-toplevel");
           break;
         case "popup":
@@ -215,10 +327,6 @@ compo.on("connection", (c) => {
 
     // let mouseMoved = 0;
     const move = function (evt: MouseEvent, forceLeave?: boolean) {
-      if (!currentSeat) return;
-
-      (evt.target as HTMLElement).style.outline = '#f00 solid 2px';
-
       // console.log(surf);
       (obj.xdgSurface?.parent as XdgWmBase)?.addCommand("ping", {
         serial: obj.connection.time.getTime(),
@@ -229,39 +337,46 @@ compo.on("connection", (c) => {
       const mouseY = evt.clientY - containerPos.top;
       const mouseX = evt.clientX - containerPos.left;
 
-      if (evt.target !== container && evt.target !== canvas) return; // I give up on this shit wtf.
+      // if (evt.target !== container && evt.target !== canvas) return;
 
       // if (mouseMoved % 100 === 9) console.log("mouse moved");
       // mouseMoved += 1;
 
+      console.log("Something ok?");
+
+      console.log(obj, obj.inputRegions, obj.inputRegions.current, mouseY, mouseX);
+
+      evt.stopPropagation();
+
       if (
-        !forceLeave ||
-        (obj.inputRegions.current.length &&
-          isInRegion(obj.inputRegions.current, evt.offsetY, mouseX))
+        !forceLeave &&
+        isInRegion(obj.inputRegions.current, mouseY, mouseX, true)
       ) {
         if (!wasInSurface) {
           wasInSurface = true;
-          currentSurface = [obj, currentSeat];
-          // console.log('enter');
-          obj.emit("focus", currentSeat, []);
-          obj.emit("enter", currentSeat, mouseX, mouseY);
+          currentSeat = obj.connection.display.seatAuthorities.get(mySeat)!;
+          console.log('enter');
+          currentSeat.focus(obj, []);
+          const enterSerial = currentSeat.enter(obj, mouseX, mouseY);
+          mySeat.modifiers.update(currentSeat.connection, enterSerial);
         }
         // console.log('move', evt.offsetX, evt.offsetY);
-        obj.emit("moveTo", currentSeat, mouseX, mouseY);
+        currentSeat!.moveTo(mouseX, mouseY);
       } else {
-        (evt.target as HTMLElement).style.outline = 'unset';
-
-        wasInSurface = false;
-        currentSurface = null;
-        // console.log('leave');
-        obj.emit("blur", currentSeat);
-        obj.emit("leave", currentSeat);
+        if (wasInSurface) {
+          // (evt.target as HTMLElement).style.outline = 'unset';
+          wasInSurface = false;
+          if (currentSeat) currentSeat.blur(obj);
+          if (currentSeat) currentSeat.leave(obj);
+          currentSeat = undefined;
+          console.log('leave');
+        }
       }
     };
 
-    container.addEventListener("mouseover", move);
+    container.addEventListener("mouseenter", move);
     container.addEventListener("mousemove", move);
-    container.addEventListener("mouseout", (v) => move(v, true));
+    container.addEventListener("mouseleave", (v) => move(v, true));
     const webToButtonMap: Record<string, number> = {
       0: 0x110,
       1: 0x112,
@@ -272,12 +387,12 @@ compo.on("connection", (c) => {
     container.addEventListener("mousedown", (evt) => {
       // console.log('down', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
-        obj.emit("buttonDown", currentSeat, webToButtonMap[evt.button]);
+        currentSeat.buttonDown(webToButtonMap[evt.button]);
     });
     container.addEventListener("mouseup", (evt) => {
       // console.log('up', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
-        obj.emit("buttonUp", currentSeat, webToButtonMap[evt.button]);
+        currentSeat.buttonUp(webToButtonMap[evt.button]);
     });
 
     let wasShown = false;
@@ -288,10 +403,12 @@ compo.on("connection", (c) => {
 
       const b = obj.buffer.current;
 
-      const now = Date.now();
-      const fps = 1 / ((now - lastNow) / 1000);
-      console.log(`${fps}Hz`);
-      lastNow = now;
+      // const now = Date.now();
+      // const ms = now - lastNow;
+      // lastFrameTimes.push(ms);
+      // if (lastFrameTimes.length > 100) lastFrameTimes.shift();
+      // fpsEl.innerText = `${1/(lastFrameTimes.toSorted((a, b) => b - a).slice(0, 10).reduce((a, v) => a + v, 0) / 10 / 1000)}Hz`;
+      // lastNow = now;
 
       if (b === null) container.style.display = "none";
       if (b == null) return;
@@ -299,7 +416,7 @@ compo.on("connection", (c) => {
       // TODO: Make shown state within each wlsurface
       if (!wasShown) {
         wasShown = true;
-        obj.emit("shown", myOutput);
+        obj.shown(myOutput);
       }
 
       container.style.display = "block";
@@ -311,7 +428,9 @@ compo.on("connection", (c) => {
         lastDimensions = [b.height, b.width];
       }
 
-      canvas.style.transform = `translate(${obj.offset.current[1]}px, ${obj.offset.current[0]}px)`;
+      // canvas.style.transform = `translate(${obj.offset.current[1]}px, ${obj.offset.current[0]}px)`;
+
+      container.style.transform = ``;
 
       const currlyDamagedBuffer = obj.getCurrlyDammagedBuffer();
 

@@ -6,8 +6,28 @@
         <title>Cathodique</title>
         <script>var exports = {};</script>
         <script src="./index.js" defer ></script>
+        <link rel="stylesheet" href="https://unpkg.com/7.css">
         <link href="./style.css" rel="stylesheet">
     </head>
     <body>
+        <template id="window">
+            <div class="background window-window">
+                <div class="window glass active">
+                    <div class="title-bar">
+                        <div class="title-bar-text"><slot name="window_title">Window</slot></div>
+                        <div class="title-bar-controls">
+                            <button aria-label="Minimize"></button>
+                            <button aria-label="Close"></button>
+                        </div>
+                    </div>
+                    <div class="window-body">
+                        <slot name="window_contents">Window</slot>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <div class="window_area">
+
+        </div>
     </body>
 </html>
