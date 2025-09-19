@@ -14,6 +14,8 @@ import { codeToScan } from "./codeToScancode";
 import { WlSubsurface } from "@cathodique/wl-serv-high/dist/objects/wl_subsurface";
 import { XdgToplevel } from "@cathodique/wl-serv-high/dist/objects/xdg_toplevel";
 import { WindowGeometry, XdgSurface } from "@cathodique/wl-serv-high/dist/objects/xdg_surface";
+import { ZxdgToplevelDecorationV1 } from "@cathodique/wl-serv-high/dist/objects/zxdg_decoration_manager_v1";
+import { WlBuffer } from "@cathodique/wl-serv-high/dist/objects/wl_buffer";
 // import { WlPointer } from "@cathodique/wl-serv-high/dist/objects/wl_pointer";
 
 // HERE
@@ -181,6 +183,8 @@ document.body.addEventListener("keyup", (v) => {
   currentSeat.keyUp(scancode);
 });
 
+const buffers = new Map<WlBuffer, HTMLCanvasElement>();
+
 compo.on("connection", (c) => {
   // console.log(c);
 
@@ -189,6 +193,13 @@ compo.on("connection", (c) => {
   // const myOutputTransport = outputReg.transports.get(c)!.get(myOutput)!;
 
   c.on("new_obj", async (obj: BaseObject) => {
+    // TODO: Separate buffer logic up here!
+    if (obj instanceof ZxdgToplevelDecorationV1) {
+      obj.on('wlSetMode', () => {
+        obj.sendToplevelDecoration('server_side');
+      });
+      obj.sendToplevelDecoration('server_side');
+    }
     if (obj instanceof WlSeat) {
       currentSeat = obj.authority;
       return;
