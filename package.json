@@ -28,7 +28,7 @@
     "@cathodique/mmap-io": "file:../mmap-io",
     "@cathodique/wl-serv-high": "file:../wl-serv-high",
     "@paralleldrive/cuid2": "^2.2.2",
-    "electron": "35.6",
+    "electron": "35.7",
     "koffi": "^2.14.0",
     "node-abi": "^4.12.0",
     "xml-parser": "^1.2.1"
