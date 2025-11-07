@@ -205,9 +205,9 @@ compo.on("connection", (c) => {
       return;
     }
     if (obj instanceof WlSubsurface) {
-      const parentDom = surfaceToDom.get(obj.assocParent)!;
+      const parentDom = surfaceToDom.get(obj.meta.parent)!;
 
-      parentDom.prepend(surfaceToDom.get(obj.assocSurface)!);
+      parentDom.prepend(surfaceToDom.get(obj.meta.surface)!);
 
       // Subsurface shenanigans
       // TODO: Apply on commit
@@ -217,14 +217,14 @@ compo.on("connection", (c) => {
             const siblingDom = surfaceToDom.get(other)!;
             const parentDom = siblingDom.parentElement!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom);
+            parentDom.insertBefore(surfaceToDom.get(this.meta.surface)!, siblingDom);
             break;
           }
           case "parent": {
             const parentDom = surfaceToDom.get(other)!;
             const parentCanvas = Array.from(parentDom.children).find((v) => v.tagName === 'canvas')!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentCanvas);
+            parentDom.insertBefore(surfaceToDom.get(this.meta.surface)!, parentCanvas);
             break;
           }
           default:
@@ -238,14 +238,14 @@ compo.on("connection", (c) => {
             const siblingDom = surfaceToDom.get(other)!;
             const parentDom = siblingDom.parentElement!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, siblingDom.nextSibling);
+            parentDom.insertBefore(surfaceToDom.get(this.meta.surface)!, siblingDom.nextSibling);
             break;
           }
           case "parent": {
             const parentDom = surfaceToDom.get(other)!;
             const parentCanvas = Array.from(parentDom.children).find((v) => v.tagName === 'canvas')!;
 
-            parentDom.insertBefore(surfaceToDom.get(this.assocSurface)!, parentCanvas.nextSibling);
+            parentDom.insertBefore(surfaceToDom.get(this.meta.surface)!, parentCanvas.nextSibling);
             break;
           }
           default:
@@ -253,7 +253,7 @@ compo.on("connection", (c) => {
         }
       });
       obj.on('wlSetPosition', function (this: WlSubsurface, { y, x }: { y: number, x: number }) {
-        const thisDom = surfaceToDom.get(this.assocSurface)!;
+        const thisDom = surfaceToDom.get(this.meta.surface)!;
 
         thisDom.style.top = `${y}px`;
         thisDom.style.left = `${x}px`;
@@ -298,7 +298,7 @@ compo.on("connection", (c) => {
         case "toplevel":
           const titleTextNode = document.createTextNode('Window');
 
-          const toplevel = obj.xdgSurface!.role as XdgToplevel;
+          const toplevel = obj.xdgSurface!.toplevel!;
 
           const windowTemplate = document.querySelector('template#window')! as HTMLTemplateElement;
           const clone = windowTemplate.content.cloneNode(true) as DocumentFragment;
@@ -336,9 +336,7 @@ compo.on("connection", (c) => {
       }
     });
 
-    // let mouseMoved = 0;
     const move = function (evt: MouseEvent, forceLeave?: boolean) {
-      // console.log(surf);
       (obj.xdgSurface?.parent as XdgWmBase)?.addCommand("ping", {
         serial: obj.connection.time.getTime(),
       });
@@ -347,11 +345,6 @@ compo.on("connection", (c) => {
 
       const mouseY = evt.clientY - containerPos.top;
       const mouseX = evt.clientX - containerPos.left;
-
-      // if (evt.target !== container && evt.target !== canvas) return;
-
-      // if (mouseMoved % 100 === 9) console.log("mouse moved");
-      // mouseMoved += 1;
 
       console.log("Something ok?");
 
@@ -367,15 +360,13 @@ compo.on("connection", (c) => {
           wasInSurface = true;
           currentSeat = obj.connection.display.seatAuthorities.get(mySeat)!;
           console.log('enter');
-          currentSeat.focus(obj, []);
-          const enterSerial = currentSeat.enter(obj, mouseX, mouseY);
+          const enterSerial = currentSeat.focus(obj, []);
           mySeat.modifiers.update(currentSeat.connection, enterSerial);
+          currentSeat.enter(obj, mouseX, mouseY);
         }
-        // console.log('move', evt.offsetX, evt.offsetY);
         currentSeat!.moveTo(mouseX, mouseY);
       } else {
         if (wasInSurface) {
-          // (evt.target as HTMLElement).style.outline = 'unset';
           wasInSurface = false;
           if (currentSeat) currentSeat.blur(obj);
           if (currentSeat) currentSeat.leave(obj);
@@ -396,12 +387,10 @@ compo.on("connection", (c) => {
       4: 0x115,
     };
     container.addEventListener("mousedown", (evt) => {
-      // console.log('down', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
         currentSeat.buttonDown(webToButtonMap[evt.button]);
     });
     container.addEventListener("mouseup", (evt) => {
-      // console.log('up', webToButtonMap[evt.button]);
       if (wasInSurface && currentSeat)
         currentSeat.buttonUp(webToButtonMap[evt.button]);
     });
@@ -410,36 +399,25 @@ compo.on("connection", (c) => {
 
     let lastDimensions: [number, number] = [-Infinity, -Infinity];
     const commitHandler = async function () {
-      // console.log(obj);
 
       const b = obj.buffer.current;
-
-      // const now = Date.now();
-      // const ms = now - lastNow;
-      // lastFrameTimes.push(ms);
-      // if (lastFrameTimes.length > 100) lastFrameTimes.shift();
-      // fpsEl.innerText = `${1/(lastFrameTimes.toSorted((a, b) => b - a).slice(0, 10).reduce((a, v) => a + v, 0) / 10 / 1000)}Hz`;
-      // lastNow = now;
 
       if (b === null) container.style.display = "none";
       if (b == null) return;
 
-      // TODO: Make shown state within each wlsurface
       if (!wasShown) {
         wasShown = true;
         obj.shown(myOutput);
       }
 
       container.style.display = "block";
-      if (lastDimensions[0] !== b.height || lastDimensions[1] !== b.width) {
-        container.style.width = `${b.width}px`;
-        container.style.height = `${b.height}px`;
-        canvas.width = b.width;
-        canvas.height = b.height;
-        lastDimensions = [b.height, b.width];
+      if (lastDimensions[0] !== b.meta.height || lastDimensions[1] !== b.meta.width) {
+        container.style.width = `${b.meta.width}px`;
+        container.style.height = `${b.meta.height}px`;
+        canvas.width = b.meta.width;
+        canvas.height = b.meta.height;
+        lastDimensions = [b.meta.height, b.meta.width];
       }
-
-      // canvas.style.transform = `translate(${obj.offset.current[1]}px, ${obj.offset.current[0]}px)`;
 
       container.style.transform = ``;
 
@@ -451,16 +429,10 @@ compo.on("connection", (c) => {
       const arr = new Uint8ClampedArray(
         b.buffer.buffer,
         0,
-        b.width * b.height * 4,
+        b.meta.width * b.meta.height * 4,
       );
       if (arr.length > 0) {
-        let imageData = new ImageData(arr, b.width, b.height);
-
-        // const bitmap = await createImageBitmap(imageData, 0, 0, b.width, b.height);
-        // b.addCommand('release', {});
-        // b.connection.sendPending();
-        // surf.buffer.current?.addCommand('release', {});
-        // b.connection.sendPending();
+        let imageData = new ImageData(arr, b.meta.width, b.meta.height);
 
         for (const rect of currlyDamagedBuffer) {
           ctx!.putImageData(imageData, 0, 0, rect.x, rect.y, rect.w, rect.h);
