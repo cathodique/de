@@ -3,7 +3,7 @@ import {
   InstructionType,
   RegRectangle,
 } from "@cathodique/wl-serv-high/dist/objects/wl_region";
-import { SeatAuthority, SeatConfiguration, WlSeat } from "@cathodique/wl-serv-high/dist/objects/wl_seat";
+import { SeatConfiguration, WlSeat } from "@cathodique/wl-serv-high/dist/objects/wl_seat";
 import { KeyboardRegistry } from "@cathodique/wl-serv-high/dist/objects/wl_keyboard";
 import { BaseObject } from "@cathodique/wl-serv-high/dist/objects/base_object";
 import { WlSurface } from "@cathodique/wl-serv-high/dist/objects/wl_surface";
@@ -16,6 +16,8 @@ import { XdgToplevel } from "@cathodique/wl-serv-high/dist/objects/xdg_toplevel"
 import { WindowGeometry, XdgSurface } from "@cathodique/wl-serv-high/dist/objects/xdg_surface";
 import { ZxdgToplevelDecorationV1 } from "@cathodique/wl-serv-high/dist/objects/zxdg_decoration_manager_v1";
 import { WlBuffer } from "@cathodique/wl-serv-high/dist/objects/wl_buffer";
+import { SeatAuthority, SeatInstances, SeatRegistry } from "@cathodique/wl-serv-high/dist/registries/seat";
+import { OutputRegistry } from "@cathodique/wl-serv-high/dist/registries/output";
 // import { WlPointer } from "@cathodique/wl-serv-high/dist/objects/wl_pointer";
 
 // HERE
@@ -90,7 +92,7 @@ class Modifiers {
   }
 
   update(connection: HLConnection, serial?: number) {
-    const authority = connection.display.seatAuthorities.get(this.seatConfig)!;
+    const authority = connection.display.seatRegistry.get(this.seatConfig)!.get(connection)!;
 
     authority.modifiers(this.depressedBitmask, this.latchedBitmask, this.lockedBitmask, this.group, serial);
   }
@@ -107,13 +109,15 @@ class Modifiers {
   }
 }
 
-const mySeat = {
+const mySeatConfig = {
   name: "seat0",
   capabilities: 3,
   modifiers: null as unknown as Modifiers,
 };
-mySeat.modifiers = new Modifiers(mySeat);
-// const seatReg = new SeatRegistry([mySeat]);
+mySeatConfig.modifiers = new Modifiers(mySeatConfig);
+
+const seatReg = new SeatRegistry();
+seatReg.addAuthority(mySeatConfig);
 
 const myOutput = {
   x: 0,
@@ -123,14 +127,15 @@ const myOutput = {
   effectiveW: 1920,
   effectiveH: 1080,
 };
-// const outputReg = new OutputRegistry([myOutput]);
+const outputReg = new OutputRegistry();
+outputReg.addAuthority(myOutput);
 
 // const outputMap = new Map<OutputConfiguration, WlOutput>();
 
 const compo = new HLCompositor({
   wl_registry: {
-    outputs: [myOutput],
-    seats: [mySeat],
+    outputs: outputReg,
+    seats: seatReg,
   },
   wl_keyboard: new KeyboardRegistry({ keymap: "us" }),
 });
@@ -143,17 +148,17 @@ tickAnimationFrame();
 
 const surfaceToDom = new Map<WlSurface, HTMLDivElement>();
 
-let currentSeat: SeatAuthority | undefined = undefined;
+let currentSeat: SeatInstances | undefined = undefined;
 // WTF!!
 // let currentKeyboards: Map<HLConnection, WlKeyboard> = new Map();
 
 document.body.addEventListener("keydown", (v) => {
   if (!currentSeat) {
-    mySeat.modifiers.updateAccordingly(v);
+    mySeatConfig.modifiers.updateAccordingly(v);
     return;
   }
   v.preventDefault();
-  mySeat.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
+  mySeatConfig.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
 
   const isInMap = (code: string): code is keyof typeof codeToScan =>
     code in codeToScan;
@@ -167,11 +172,11 @@ document.body.addEventListener("keydown", (v) => {
 
 document.body.addEventListener("keyup", (v) => {
   if (!currentSeat) {
-    mySeat.modifiers.updateAccordingly(v);
+    mySeatConfig.modifiers.updateAccordingly(v);
     return;
   }
   v.preventDefault();
-  mySeat.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
+  mySeatConfig.modifiers.ifUpdateThenEmit(v, currentSeat.connection);
 
   const isInMap = (code: string): code is keyof typeof codeToScan =>
     code in codeToScan;
@@ -200,14 +205,10 @@ compo.on("connection", (c) => {
       });
       obj.sendToplevelDecoration('server_side');
     }
-    if (obj instanceof WlSeat) {
-      currentSeat = obj.authority;
-      return;
-    }
     if (obj instanceof WlSubsurface) {
       const parentDom = surfaceToDom.get(obj.meta.parent)!;
 
-      parentDom.prepend(surfaceToDom.get(obj.meta.surface)!);
+      parentDom.append(surfaceToDom.get(obj.meta.surface)!);
 
       // Subsurface shenanigans
       // TODO: Apply on commit
@@ -358,10 +359,10 @@ compo.on("connection", (c) => {
       ) {
         if (!wasInSurface) {
           wasInSurface = true;
-          currentSeat = obj.connection.display.seatAuthorities.get(mySeat)!;
+          currentSeat = obj.connection.display.seatRegistry.get(mySeatConfig)!.get(c)!;
           console.log('enter');
           const enterSerial = currentSeat.focus(obj, []);
-          mySeat.modifiers.update(currentSeat.connection, enterSerial);
+          mySeatConfig.modifiers.update(currentSeat.connection, enterSerial);
           currentSeat.enter(obj, mouseX, mouseY);
         }
         currentSeat!.moveTo(mouseX, mouseY);
