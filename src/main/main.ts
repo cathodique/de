@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
+
+import { registerProtocols } from "./protocols.js";
 
 // app.allowRendererProcessReuse = false;
 
@@ -13,12 +14,15 @@ const createWindow = () => {
     // fullscreen: true,
     webPreferences: {
       nodeIntegration: true,
+      nodeIntegrationInSubFrames: false,
       contextIsolation: false,
     },
   });
 
+  registerProtocols();
+
   // win.webContents.openDevTools();
-  win.loadFile(join(__dirname, "../dist/index.html"));
+  win.loadURL("app://top/index.html");
 };
 
 const deleteQueue: string[] = [];
