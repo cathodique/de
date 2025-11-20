@@ -2,11 +2,12 @@
   "name": "@cathodique/de",
   "version": "1.0.1",
   "description": "Cathodique Desktop Environment",
-  "main": "dist/main.js",
+  "main": "dist/main/main.js",
+  "type": "module",
   "scripts": {
     "start": "tsc && LOGGERS=wl_serv_i8a56qb0lm3ox1ng1cqai0e1 electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc && cp -frfr assets/* dist/"
+    "build": "rm -frfr dist && mkdir dist && cp -frfr src/* dist/ && find dist/ -name \"*.ts\" -type f -delete && npx tsc"
   },
   "repository": {
     "type": "git",
