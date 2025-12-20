@@ -3,10 +3,6 @@ import { rmSync } from "node:fs";
 
 import { registerProtocols } from "./protocols.js";
 
-// app.allowRendererProcessReuse = false;
-
-// app.commandLine.appendSwitch("disable-hid-blocklist");
-
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 800,
