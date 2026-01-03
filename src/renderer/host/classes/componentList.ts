@@ -1,10 +1,17 @@
 import { Component, ComponentHandle } from "./component.js";
+import { LocalModule } from "./module.js";
 
 export class InvalidComponentError extends Error {}
 
 export class ComponentList extends EventTarget {
-  componentClasses = new Map<string, new (...args: any[]) => ComponentHandle>();
-  componentClassToClassName = new Map<new (...args: any[]) => ComponentHandle, string>()
+  componentClasses = new Map<string, new (mod: LocalModule, ...args: any[]) => ComponentHandle>();
+  componentClassToClassName = new Map<new (mod: LocalModule, ...args: any[]) => ComponentHandle, string>()
+
+  module: LocalModule;
+  constructor(mod: LocalModule) {
+    super();
+    this.module = mod;
+  }
 
   componentTypeOf(component: Component) {
     // Traversing prototype chain (from most specific to least specific)
@@ -21,7 +28,7 @@ export class ComponentList extends EventTarget {
     // Implications: The object has had [Symbol(Component.isComponentSymbol)] set to true but was not a component
   }
 
-  register(componentName: string, componentClass: new (...args: any[]) => ComponentHandle) {
+  register(componentName: string, componentClass: new (mod: LocalModule) => ComponentHandle) {
     if (this.componentClasses.has(componentName))
       throw new Error("This component already exists");
 
@@ -30,7 +37,12 @@ export class ComponentList extends EventTarget {
   }
 
   get(componentName: string) {
-    return this.componentClasses.get(componentName);
+    const InnerClass = this.componentClasses.get(componentName);
+    if (!InnerClass) return;
+
+    return function (this: ComponentList, ...args: any[]) {
+      return new InnerClass(this.module, ...args);
+    }.bind(this) as unknown as new (...args: any[]) => ComponentHandle;
   }
 }
 
@@ -38,5 +50,3 @@ export type ComponentListHandle = {
   get(componentName: string): undefined
     | (new (...args: any[]) => ComponentHandle);
 };
-
-export const componentList = new ComponentList();

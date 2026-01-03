@@ -94,6 +94,10 @@ class MutationDispatcher {
 }
 
 export class SharedDOM {
+  static finReg = new FinalizationRegistry((heldValue) => {
+    parentIpc.rpc("deleteNode", { id: heldValue });
+  });
+
   static initOrGet(root: Node) {
     if (NodeRegistry.hasNode(root)) return NodeRegistry.getId(root);
     this.init(root);
@@ -106,18 +110,19 @@ export class SharedDOM {
   }
 
   static registerSubtree(node: Node) {
-    NodeRegistry.getId(node);
+    const id = NodeRegistry.getId(node);
     if (node instanceof HTMLTemplateElement) this.registerSubtree(node.content);
     node.childNodes.forEach(function (this: typeof SharedDOM, n: Node) { this.registerSubtree(n) }.bind(this));
 
     parentIpc.post({
       type: "createNode",
       data: {
-        id: NodeRegistry.getId(node),
+        id: id,
         payload: serializeNode(node),
         events: serializeEvents(node),
       },
     });
+    this.finReg.register(node, id);
   }
 
   static handleMutation(m: MutationRecord) {

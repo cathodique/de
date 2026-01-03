@@ -1,3 +1,6 @@
+import z from "zod";
+import { OrderedPeer } from "../classes/orderedPeer";
+
 export interface ElementFromIpc {
   kind: "element";
   tagName: string;
@@ -23,8 +26,14 @@ export interface ArbitraryNodeFromIpc {
 
 export type NodeFromIpc = ElementFromIpc | TextNodeFromIpc | DocumentFragmentFromIpc | ArbitraryNodeFromIpc;
 
-export interface EventFromIpc {
-  className: string;
-  type: string;
-  values: Record<string, any>;
+export const zodEventFromIpc = z.object({
+  className: z.string(),
+  type: z.string(),
+  values: z.record(z.string(), z.any()),
+});
+export type EventFromIpc = z.output<typeof zodEventFromIpc>;
+
+export interface HandlerContext {
+  ipc: OrderedPeer;
+  event: MessageEvent;
 }

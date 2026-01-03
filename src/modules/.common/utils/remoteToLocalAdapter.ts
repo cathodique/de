@@ -1,0 +1,104 @@
+import { Component } from "../classes/component.js";
+import { ComponentListHandle } from "../classes/componentList.js";
+import { Latch, LatchState } from "../classes/latch.js";
+import { RemoteModule } from "../classes/module.js";
+import { OrderedPeer } from "../classes/orderedPeer.js";
+import { unwrapValue, WrappedValue, wrapValue } from "./wrap.js";
+
+export class ComponentListProxy implements ComponentListHandle {
+  componentClasses = new Map<string, new () => ComponentInstanceProxy>();
+
+  get(componentName: string) {
+    return this.componentClasses.get(componentName);
+  }
+}
+
+export class ComponentInstance {
+  ipc: OrderedPeer;
+
+  module: RemoteModule;
+
+  #args: any[] = [];
+
+  componentName: string;
+  constructor(module: RemoteModule, componentName: string, options: { componentId: string } | { args: any[] }) {
+    this.module = module;
+
+    this.ipc = this.module.peer;
+    this.componentName = componentName;
+
+    if ("componentId" in options) this.#cidLatch.resolve!(options.componentId);
+    if ("args" in options) this.#args = options.args;
+  }
+
+  #cidLatch = new Latch<string>();
+  get componentId() { return this.#cidLatch.promise; }
+
+  ready = new Latch<void>();
+
+  async init() {
+    if (this.#cidLatch.getState() === LatchState.Pending) {
+      await this.module.waitForComponent(this.componentName);
+
+      await this.module.componentReady.get(this.componentName);
+      const componentId = await this.ipc.rpc("createInstance", {
+        className: this.componentName,
+        args: this.#args.map((v) => wrapValue(v)),
+      });
+      this.#cidLatch.resolve!(componentId);
+      this.ready.resolve!();
+    }
+  }
+}
+export type ComponentInstanceProxy = ComponentInstance
+  & Partial<Record<string, any>>
+  & { [Component.isComponentSymbol]: true };
+
+function generateCalledOrAwaited({ called, awaited }: { called: (...args: any[]) => any, awaited: () => any }) {
+  const result = async function (...args: any[]) {
+    return called(...args);
+  };
+  result.then = async (resolve: (a: any) => void) => {
+    resolve(await awaited());
+  };
+  return result;
+}
+
+export function makeComponentProxy(module: RemoteModule, componentName: string, options: { componentId: string } | { args: any[] }): ComponentInstanceProxy {
+  const compInst = new ComponentInstance(module, componentName, options);
+  compInst.init();
+
+  return new Proxy(compInst, {
+    get(target, prop) {
+      if (prop === Component.isComponentSymbol) return true;
+
+      if (target[prop as keyof typeof target]) return target[prop as keyof typeof target];
+
+      if (prop === "then") return undefined;
+
+      return generateCalledOrAwaited({
+        called: async function (...args: any[]) {
+          const id = await compInst.componentId;
+
+          const val = await module.peer.rpc("callProperty", {
+            methodName: prop,
+            arguments: args.map((v) => wrapValue(v)),
+            componentId: id,
+          });
+
+          return unwrapValue(val, module);
+        },
+        awaited: async () => {
+          const id = await compInst.componentId;
+
+          const val = await module.peer.rpc("getProperty", {
+            propertyName: prop,
+            componentId: id,
+          });
+
+          return unwrapValue(val, module);
+        },
+      });
+    },
+  }) as ComponentInstanceProxy;
+}

@@ -7,7 +7,8 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 800,
     height: 600,
-    // fullscreen: true,
+    fullscreen: true,
+    resizable: false,
     webPreferences: {
       nodeIntegration: true,
       nodeIntegrationInSubFrames: false,

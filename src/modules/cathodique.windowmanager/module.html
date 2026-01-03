@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Test</title>
+	<script src="/.common/setup.js" type="module"></script>
+</head>
+<body>
+    <template id="window_manager">
+
+    </template>
+    <script type="module">
+        import { Component, componentList } from "/.common/bundle.js";
+
+        class WindowFrame extends Component {
+            $output = document.querySelector("#window_frame").content.cloneNode(true);
+
+            #windowFrameModule;
+            windowFrames = new Map(); // from WindowComponent to
+
+            constructor() {
+                super();
+
+                this.#windowFrameModule = this.getDependency("WindowFrame");
+
+                console.log('HELLO WORLD!!!');
+                this.$template.querySelector("p").addEventListener("mousemove", (e) => {
+                  console.log(e);
+                });
+            }
+
+            async $spawnWindow(window) {
+                // window is a window component :3
+                const WindowFrame = this.#windowFrameModule.get("WindowFrame");
+                const windowFrame = new WindowFrame(window);
+
+                this.$output.append(await windowFrame.$output);
+            }
+        }
+
+        componentList.register("WindowFrame", WindowFrame);
+    </script>
+</body>
+</html>

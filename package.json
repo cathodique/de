@@ -6,8 +6,10 @@
   "scripts": {
     "start": "npm run build && LOGGERS=wl_serv_i8a56qb0lm3ox1ng1cqai0e1 electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build-browser": "esbuild dist/renderer/wayland/index.js --bundle --platform=node --target=node22.4 --external:electron --external:@cathodique/wl-serv-high --outfile=dist/renderer/index.js",
-    "build": "rm -frfr dist && mkdir dist && cp -frfr src/* dist/ && find dist/ -name \"*.ts\" -type f -delete && npx tsgo && npx tsc -p tsconfig.modules.json && npm run build-browser"
+    "build-asset-homomorphic": "rm -frfr dist && mkdir dist && cp -frfr src/* dist/ && find dist/ -name \"*.ts\" -type f -delete",
+    "build-browser-host": "esbuild dist/renderer/wayland/index.js --bundle --platform=node --target=node22.4 --external:electron --external:@cathodique/wl-serv-high --outfile=dist/renderer/index.js",
+    "build-browser-common": "esbuild dist/modules/.common/index.js --bundle --outfile=dist/modules/.common/bundle.js --format=esm",
+    "build": "npm run build-asset-homomorphic && npx tsgo && npx tsc -p tsconfig.modules.json && npm run build-browser-host && npm run build-browser-common"
   },
   "repository": {
     "type": "git",
@@ -23,11 +25,12 @@
     "@electron/rebuild": "^3.7.1",
     "@types/electron": "^1.4.38",
     "@types/node": "^22.10.2",
+    "prettier": "3.7.4",
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "@cathodique/usocket": "file:../usocket",
     "@cathodique/mmap-io": "file:../mmap-io",
+    "@cathodique/usocket": "file:../usocket",
     "@cathodique/wl-serv-high": "file:../wl-serv-high",
     "@paralleldrive/cuid2": "^2.2.2",
     "@typescript/native-preview": "^7.0.0-dev.20251220.1",
@@ -35,7 +38,8 @@
     "esbuild": "^0.27.2",
     "koffi": "^2.14.0",
     "node-abi": "^4.12.0",
-    "xml-parser": "^1.2.1"
+    "xml-parser": "^1.2.1",
+    "zod": "^4.2.1"
   },
   "overrides": {
     "nan": "^2.23.0"

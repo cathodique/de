@@ -26,5 +26,7 @@ export class Output {
     this.dom.style.left = `${this.config.y}px`;
     this.dom.style.width = `${this.config.w}px`;
     this.dom.style.height = `${this.config.h}px`;
+
+    document.body.querySelector('main')!.append(this.dom);
   }
 }

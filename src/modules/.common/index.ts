@@ -4,7 +4,6 @@
 //   Because, them being dereferenced implied it's not ref'able
 //   through the DOM tree
 
-
 import { OrderedPeer } from "./classes/orderedPeer.js";
 import { patchAllEvents } from "./utils/nodeEventListener.js";
 patchAllEvents();

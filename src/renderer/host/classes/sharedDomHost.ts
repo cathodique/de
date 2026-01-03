@@ -1,4 +1,5 @@
 import { NodeFromIpc } from "../utils/types.js";
+import { nanoid } from "../utils/utils.js";
 
 class NodeData {
   node: Node;
@@ -23,43 +24,53 @@ class NodeData {
 }
 
 export class OtherNodeRegistry {
-  static registryPerWindow = new WeakMap<WindowProxy, OtherNodeRegistry>();
+  static registryPerSource = new WeakMap<MessageEventSource, OtherNodeRegistry>();
 
-  static registryOf(win: WindowProxy) {
-    return this.registryPerWindow.get(win);
+  static registryOf(source: MessageEventSource) {
+    return this.registryPerSource.get(source);
   }
-  static setRegistry(win: WindowProxy, nr: OtherNodeRegistry) {
-    if (OtherNodeRegistry.registryPerWindow.has(win)) throw new Error("Only one NodeRegistry per window may exist");
-    return this.registryPerWindow.set(win, nr);
+  static setRegistry(source: MessageEventSource, nr: OtherNodeRegistry) {
+    if (OtherNodeRegistry.registryPerSource.has(source)) throw new Error("Only one NodeRegistry per window may exist");
+    return this.registryPerSource.set(source, nr);
   }
 
-  nodeToId = new WeakMap<Node, string>();
-  idToNode = new Map<string, WeakRef<Node>>();
-  nodeData = new WeakMap<Node, NodeData>();
+  nodeToId = new Map<Node, string>();
+  idToNode = new Map<string, Node>();
+  nodeData = new Map<Node, NodeData>();
   nodeDataOf(node: Node) {
     return this.nodeData.get(node);
   }
 
-  win: WindowProxy;
+  source: MessageEventSource;
 
-  constructor(win: WindowProxy) {
-    this.win = win;
+  constructor(source: MessageEventSource) {
+    this.source = source;
   }
 
   hasNode(node: Node) {
     return this.nodeToId.has(node);
   }
   getNode(id: string) {
-    return this.idToNode.get(id)?.deref();
+    return this.idToNode.get(id);
   }
 
   setNodeId(node: Node, id: string) {
     this.nodeToId.set(node, id);
-    this.idToNode.set(id, new WeakRef(node));
+    this.idToNode.set(id, node);
 
     this.nodeData.set(node, new NodeData(node, this));
 
     return node;
+  }
+
+  deleteNode(id: string) {
+    const node = this.idToNode.get(id);
+    if (node) {
+      this.nodeToId.delete(node);
+      this.idToNode.delete(id);
+
+      this.nodeData.delete(node);
+    }
   }
 
   changeOwnership(id: string, node: Node) {
@@ -159,5 +170,20 @@ export class OtherNodeRegistry {
   unregisterEvent (node: Node, event: string) {
     const eventListener = this.nodeDataOf(node)!.deregisterEventListener(event);
     node.removeEventListener(event, eventListener);
+  }
+}
+
+export const nodeRegistry = new OtherNodeRegistry(window);
+OtherNodeRegistry.setRegistry(window, nodeRegistry);
+
+export class SharedDOM {
+  static initOrGet(root: Node) {
+    if (nodeRegistry.hasNode(root)) return nodeRegistry.getId(root)!;
+    this.init(root);
+    return nodeRegistry.getId(root)!;
+  }
+
+  static init(node: Node) {
+    nodeRegistry.setNodeId(node, nanoid());
   }
 }

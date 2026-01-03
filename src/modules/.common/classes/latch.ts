@@ -1,4 +1,4 @@
-enum LatchState {
+export enum LatchState {
   Pending,
   Fulfilled,
 }
@@ -6,13 +6,17 @@ enum LatchState {
 export class Latch<T> {
   promise: Promise<T>;
   resolve: ((v: T) => void) | undefined;
+
   constructor(value?: T) {
-    if (value) {
+    if (value != null) {
       this.resolve = undefined;
       this.promise = Promise.resolve(value);
     } else {
       let resultingResolve: (r: T) => void;
+
+      // Assignment with side effect onto resultingResolve
       this.promise = new Promise<T>((r) => { resultingResolve = r });
+
       this.resolve = function (this: Latch<T>, r: T) {
         resultingResolve(r);
         this.resolve = undefined;
@@ -29,26 +33,36 @@ export class Latch<T> {
 export class KeyedLatch<T, U> {
   map = new Map<T, Latch<U>>();
 
-  getStateOf(key: T) {
+  getStateOf(key: T): LatchState {
     return this.map.get(key)?.getState() ?? LatchState.Pending;
   }
-  get(key: T) {
+
+  get(key: T): Promise<U> {
     if (this.map.has(key)) return this.map.get(key)!.promise;
+
     const latch = new Latch<U>();
     this.map.set(key, latch);
+
     return latch.promise;
   }
-  resolve(key: T, value: U) {
+
+  resolve(key: T, value: U): typeof value {
     if (!this.map.has(key)) {
       this.map.set(key, new Latch(value));
+    } else {
+      const { resolve } = this.map.get(key)!;
+      if (!resolve) throw new Error('Double resolution is unacceptable');
+
+      resolve(value);
     }
-    this.map.get(key)!.resolve?.(value);
     return value;
   }
+
   getOptional(key: T) {
     if (this.map.has(key)) return this.get(key);
     return undefined;
   }
+
   delete(key: T) {
     this.map.delete(key);
   }
@@ -60,23 +74,33 @@ export class WeakKeyedLatch<T extends WeakKey, U> {
   getStateOf(key: T) {
     return this.map.get(key)?.getState() ?? LatchState.Pending;
   }
+
   get(key: T) {
     if (this.map.has(key)) return this.map.get(key)!.promise;
+
     const latch = new Latch<U>();
     this.map.set(key, latch);
+
     return latch.promise;
   }
+
   resolve(key: T, value: U) {
     if (!this.map.has(key)) {
       this.map.set(key, new Latch(value));
+    } else {
+      const { resolve } = this.map.get(key)!;
+      if (!resolve) throw new Error('Double resolution is unacceptable');
+
+      resolve(value);
     }
-    this.map.get(key)!.resolve?.(value);
     return value;
   }
+
   getOptional(key: T) {
     if (this.map.has(key)) return this.get(key);
     return undefined;
   }
+
   delete(key: T) {
     this.map.delete(key);
   }
@@ -97,6 +121,7 @@ export class ConsumableKeyedLatch<T, U> extends KeyedLatch<T, U> {
     }
     return result;
   }
+
   /**
    * @deprecated For semantic reasons, use consume instead
    * Method kept for inheritance
@@ -104,6 +129,7 @@ export class ConsumableKeyedLatch<T, U> extends KeyedLatch<T, U> {
   get(key: T) {
     return this.consume(key);
   }
+
   resolve(key: T, value: U) {
     const result = super.resolve(key, value);
     if (this.consumed.has(key)) {
@@ -129,6 +155,7 @@ export class ConsumableWeakKeyedLatch<T extends WeakKey, U> extends WeakKeyedLat
     }
     return result;
   }
+
   /**
    * @deprecated For semantic reasons, use consume instead
    * Method kept for inheritance
@@ -136,6 +163,7 @@ export class ConsumableWeakKeyedLatch<T extends WeakKey, U> extends WeakKeyedLat
   get(key: T) {
     return this.consume(key);
   }
+
   resolve(key: T, value: U) {
     const result = super.resolve(key, value);
     if (this.consumed.has(key)) {

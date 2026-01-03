@@ -1,59 +1,102 @@
-import { ComponentList } from "../classes/componentList.js";
-import { SharedDOM } from "../classes/sharedDomRemote.js";
+import z from "zod";
+import { componentList, ComponentList } from "../classes/componentList.js";
+import { HandlerContext } from "../utils/types.js";
+import { unwrapValue, WrappedValue, wrapValue, zodWrappedValue } from "../utils/wrap.js";
+import { Component } from "../classes/component.js";
+import { RemoteModule } from "../classes/module.js";
+
+// DISTINCTIONS WITH HOST
+// A single module has a single componentList
+// So componentList need be static
+
+// A single module determines its own IDs thus makes ID attacks impossible
+// So componentInstances need be static
 
 export class CathodiqueProviderHandler {
-  componentList: ComponentList;
+  [k: string]: (arg: Record<string, any>, ctx: HandlerContext) => any;
 
-  constructor(componentList: ComponentList) {
-    this.componentList = componentList;
+  static #componentList: ComponentList = componentList;
+
+  static #componentInstances = new Map<string, any>();
+
+  #fromModule: RemoteModule | undefined;
+  constructor(fromModule: RemoteModule | undefined) {
+    this.#fromModule = fromModule;
   }
 
-  componentInstances = new Map<string, any>();
+  createInstance(arg: Record<string, any>) {
+    return this.#createInstance(z.object({
+      data: z.object({
+        className: z.string(),
+        args: z.array(zodWrappedValue),
+      }),
+    }).parse(arg));
+  }
+  async #createInstance({ data }: { data: { className: string, args: WrappedValue[] } }) {
+    const ClassObj = CathodiqueProviderHandler.#componentList.get(data.className);
+    if (!ClassObj) return; // TODO error here
 
-  async createInstance({ data }: { data: { className: string; componentId: string } }) {
-    // TODO Obj verification
-    const ClassObj = this.componentList.get(data.className);
-    if (!ClassObj) return; // Quiet fail
-
-    const componentInstance = new ClassObj();
+    const unwrapped = data.args.map(function (this: CathodiqueProviderHandler, v: WrappedValue) {
+      return unwrapValue(v, this.#fromModule)
+    }.bind(this));
+    const componentInstance = new ClassObj(...unwrapped) as Component;
 
     await componentInstance.init();
 
-    this.componentInstances.set(data.componentId, componentInstance);
-    return;
+    CathodiqueProviderHandler.#componentInstances.set(
+      componentInstance.componentId,
+      componentInstance,
+    );
+    return componentInstance.componentId;
   }
 
-  getProperty({ data }: { data: { propertyName: string; componentId: string } }) {
-    const component = this.componentInstances.get(data.componentId);
+  instanceExists(arg: Record<string, any>) {
+    return this.#instanceExists(z.object({
+      data: z.object({
+        componentId: z.string(),
+      }),
+    }).parse(arg));
+  }
+  #instanceExists({ data }: { data: { componentId: string } }) {
+    return CathodiqueProviderHandler.#componentInstances.has(data.componentId);
+  }
+
+  getProperty(arg: Record<string, any>) {
+    return this.#getProperty(z.object({
+      data: z.object({
+        propertyName: z.string(),
+        componentId: z.string(),
+      }),
+    }).parse(arg));
+  }
+  async #getProperty({ data }: { data: { propertyName: string; componentId: string } }) {
+    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
 
     const value = component[data.propertyName];
 
-    if (value instanceof Node) {
-      const nodeId = SharedDOM.initOrGet(value);
-
-      return { nodeId };
-    }
-
-    return { value };
+    return wrapValue(value);
   }
 
-  async callProperty({ data }: {
+  callProperty(arg: Record<string, any>) {
+    return this.#callProperty(z.object({
+      data: z.object({
+        methodName: z.string(),
+        arguments: z.array(z.any()),
+        componentId: z.string(),
+      }),
+    }).parse(arg));
+  }
+  async #callProperty({ data }: {
     data: {
       methodName: string;
-      arguments: string[];
+      arguments: any[];
       componentId: string;
     };
   }) {
-    const component = this.componentInstances.get(data.componentId);
+    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
 
     const value = await component?.[data.methodName]?.(...data.arguments);
 
-    if (value instanceof Node) {
-      const nodeId = SharedDOM.initOrGet(value);
-
-      return { nodeId };
-    }
-
-    return { value };
+    return wrapValue(value);
   }
 };

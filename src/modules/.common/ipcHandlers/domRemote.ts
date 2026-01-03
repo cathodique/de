@@ -1,8 +1,11 @@
+import z from "zod";
 import { NodeRegistry } from "../classes/sharedDomRemote.js";
-import { EventFromIpc } from "../utils/types.js";
+import { EventFromIpc, HandlerContext, zodEventFromIpc } from "../utils/types.js";
 
 export class DOMRemoteHandler {
-  deserializeEvent(evtData: EventFromIpc): Event {
+  [k: string]: (arg: Record<string, any>, ctx: HandlerContext) => any;
+
+  #deserializeEvent(evtData: EventFromIpc): Event {
     if (!evtData.className.endsWith("Event")) throw new Error("Constructor name must be an event");
     const EventClassObj = globalThis[evtData.className as keyof typeof globalThis] as typeof Event;
 
@@ -23,11 +26,19 @@ export class DOMRemoteHandler {
     return new EventClassObj(evtData.type, newValues);
   }
 
-  domEmitEvent({ data }: { data: { id: string, event: EventFromIpc } }) {
+  domEmitEvent(arg: Record<string, any>) {
+    return this.#domEmitEvent(z.object({
+      data: z.object({
+        id: z.string(),
+        event: zodEventFromIpc,
+      }),
+    }).parse(arg));
+  }
+  #domEmitEvent({ data }: { data: { id: string, event: EventFromIpc } }) {
     const element = NodeRegistry.getNode(data.id);
 
     if (!element) return console.error(`Tried to emit event ${data.event} to inexistent element ${data.id}`);
 
-    element.dispatchEvent(this.deserializeEvent(data.event));
+    element.dispatchEvent(this.#deserializeEvent(data.event));
   }
 };

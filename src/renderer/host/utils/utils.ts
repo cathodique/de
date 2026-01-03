@@ -14,3 +14,11 @@ export { projectSubdomain, userSubdomain };
 export const host = hostList.join('.')
 
 export const hostWithoutSubdomain = `${location.protocol}//${hostList.join(".")}:${location.port}`;
+
+export function findWinIndex(win: WindowProxy) {
+  for (let i = 0; i < window.length; i += 1) {
+    if (window[i] === win) {
+      return i;
+    }
+  }
+}

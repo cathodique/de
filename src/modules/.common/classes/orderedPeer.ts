@@ -2,18 +2,19 @@ import { ConsumableKeyedLatch } from "./latch.js";
 
 import { nanoid } from "../utils/utils.js";
 import { WithTransfer } from "./withTransfer.js";
+import { HandlerContext } from "../utils/types.js";
 
 export class OrderedPeer {
-  handlers: Record<string, (data: Record<string, any>) => any>[];
+  handlers: Record<string, (data: Record<string, any>, ctx: HandlerContext) => any>[] = [];
 
-  static actualHandlers = new WeakMap<WindowProxy, (evt: MessageEvent) => void>();
+  static actualHandlers = new WeakMap<MessageEventSource, (evt: MessageEvent) => void>();
   private static registered = false;
   static registerIpcListener() {
     if (this.registered) return;
     window.addEventListener(
       "message",
       (evt) => {
-        const actualHandler = this.actualHandlers.get(evt.source as WindowProxy);
+        const actualHandler = this.actualHandlers.get(evt.source as MessageEventSource);
         if (!actualHandler) return;
         actualHandler(evt);
       },
@@ -28,21 +29,25 @@ export class OrderedPeer {
 
   promiseMap = new ConsumableKeyedLatch<string, any>();
 
-  win: WindowProxy;
+  source: MessageEventSource;
   postMessage: typeof window["postMessage"];
-  constructor(win: WindowProxy, origin = "*", handlers: Record<string, (...data: any[]) => any>[]) {
-    if (OrderedPeer.actualHandlers.has(win)) throw new Error("A window may only admit a single OrderedPeer");
+  constructor(source: MessageEventSource, origin = "*") {
+    if (OrderedPeer.actualHandlers.has(source)) throw new Error("A window may only admit a single OrderedPeer");
 
-    this.win = win;
-    this.postMessage = win.postMessage.bind(win);
+    this.source = source;
+    this.postMessage = source.postMessage.bind(source);
     this.origin = origin;
-    this.handlers = handlers;
 
-    OrderedPeer.actualHandlers.set(win, this.orderedDecoder.bind(this));
+    OrderedPeer.actualHandlers.set(source, this.orderedDecoder.bind(this));
+  }
+
+  addHandler(handler: (typeof this.handlers)[number]) {
+    this.handlers.push(handler);
+    return this; // Builder
   }
 
   post(data: any) {
-    let transfer = [];
+    let transfer: WithTransfer[] = [];
     if (data instanceof WithTransfer) {
       transfer = data.transfer;
       data = data.data;
@@ -90,8 +95,6 @@ export class OrderedPeer {
   async orderedDecoder(evt: MessageEvent) {
     if (!this.originMatch(evt.origin)) return;
 
-    console.log();
-
     const { data: { messages, currentOrder } } = evt;
     this.remainingMessages.set(currentOrder, messages);
     if (this.currentOrderReception === currentOrder) {
@@ -112,7 +115,7 @@ export class OrderedPeer {
             }
 
             try {
-              const result = await handler[type](message);
+              const result = await handler[type](message, { ipc: this, event: evt });
 
               if (promiseId) {
                 this.post({ type: "reply", reply: result, promiseId });
