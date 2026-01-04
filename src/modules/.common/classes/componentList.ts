@@ -1,10 +1,11 @@
+import { ComponentHandleClass } from "../utils/types.js";
 import { Component, ComponentHandle } from "./component.js";
 
 export class InvalidComponentError extends Error {}
 
 export class ComponentList extends EventTarget {
-  componentClasses = new Map<string, new (...args: any[]) => ComponentHandle>();
-  componentClassToClassName = new Map<new (...args: any[]) => ComponentHandle, string>()
+  componentClasses = new Map<string, ComponentHandleClass>();
+  componentClassToClassName = new Map<ComponentHandleClass, string>()
 
   componentTypeOf(component: Component) {
     // Traversing prototype chain (from most specific to least specific)
@@ -21,7 +22,7 @@ export class ComponentList extends EventTarget {
     // Implications: The object has had [Symbol(Component.isComponentSymbol)] set to true but was not a component
   }
 
-  register(componentName: string, componentClass: new (...args: any[]) => ComponentHandle) {
+  register(componentName: string, componentClass: ComponentHandleClass) {
     if (this.componentClasses.has(componentName))
       throw new Error("This component already exists");
 
@@ -32,11 +33,15 @@ export class ComponentList extends EventTarget {
   get(componentName: string) {
     return this.componentClasses.get(componentName);
   }
+
+  has(componentName: string) {
+    return this.componentClasses.has(componentName);
+  }
 }
 
 export type ComponentListHandle = {
   get(componentName: string): undefined
-    | (new (...args: any[]) => ComponentHandle);
+    | ComponentHandleClass;
 };
 
 export const componentList = new ComponentList();

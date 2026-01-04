@@ -1,16 +1,15 @@
 import "../host/index.js";
 
 import { HLCompositor } from "@cathodique/wl-serv-high";
-import { InstructionType, RegRectangle } from "@cathodique/wl-serv-high/dist/objects/wl_region.js";
-import { Modifiers } from "../classes/wayland/seat/modifiers.js";
-import { SeatRegistry } from "@cathodique/wl-serv-high/dist/registries/seat.js";
-import { OutputRegistry } from "@cathodique/wl-serv-high/dist/registries/output.js";
-import { KeyboardRegistry } from "@cathodique/wl-serv-high/dist/objects/wl_keyboard.js";
+import { InstructionType, RegRectangle } from "@cathodique/wl-serv-high/objects";
+import { OutputRegistry } from "@cathodique/wl-serv-high/registries";
+import { KeyboardRegistry } from "@cathodique/wl-serv-high/objects";
 import { ipcRenderer } from "electron/renderer";
-import { Seat } from "../classes/wayland/seat/seat.js";
-import { BaseObject } from "@cathodique/wl-serv-high/dist/objects/base_object.js";
+import { BaseObject } from "@cathodique/wl-serv-high/objects";
 import { objectHandlers } from "../classes/handlers/handlers.js";
 import { Output } from "../classes/wayland/output/output.js";
+import { seatRegistry } from "./overlays/seatRegistryOverlay.js";
+import { outputRegistry } from "./overlays/outputRegistryOverlay.js";
 
 // HERE
 // TODO:::
@@ -31,13 +30,9 @@ export function isInRegion(reg: RegRectangle[], y: number, x: number, defaultVal
 const mySeatConfig = {
   name: "seat0",
   capabilities: 3,
-  modifiers: null as unknown as Modifiers,
 };
-const seatReg = new SeatRegistry();
 
-new Seat(mySeatConfig, seatReg);
-
-seatReg.addAuthority(mySeatConfig);
+seatRegistry.addAuthority(mySeatConfig);
 
 const myOutputConfig = {
   x: 0,
@@ -47,17 +42,14 @@ const myOutputConfig = {
   effectiveW: 1920,
   effectiveH: 1080,
 };
-const outputReg = new OutputRegistry();
-outputReg.addAuthority(myOutputConfig);
+outputRegistry.addAuthority(myOutputConfig);
 
-new Output(myOutputConfig, outputReg);
-
-new Seat(mySeatConfig, seatReg);
+// new Seat(mySeatConfig, seatReg);
 
 const compo = new HLCompositor({
   wl_registry: {
-    outputs: outputReg,
-    seats: seatReg,
+    outputs: outputRegistry,
+    seats: seatRegistry,
   },
   wl_keyboard: new KeyboardRegistry({ keymap: "us" }),
 });

@@ -1,9 +1,9 @@
-import { SeatAuthority, SeatInstances, SeatRegistry } from "@cathodique/wl-serv-high/dist/registries/seat.js";
+import { SeatAuthority, SeatInstances, SeatRegistry } from "@cathodique/wl-serv-high/registries";
 import { Modifiers } from "./modifiers.js";
 import { codeToScan } from "./codeToScancode.js";
 import { SurfaceDom } from "../../handlers/dom/surface.js";
 import { isInRegion } from "../../../wayland/index.js";
-import { SeatConfiguration } from "@cathodique/wl-serv-high/dist/objects/wl_seat.js";
+import { SeatConfiguration } from "@cathodique/wl-serv-high/objects";
 
 export class Seat {
   static mouseWebToButtonMap: Record<string, number> = {

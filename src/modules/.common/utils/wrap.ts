@@ -57,7 +57,7 @@ export function unwrapValue(value: any, fromModule: RemoteModule | undefined) {
     case "component":
       const moduleId = wrapped.moduleId || fromModule?.id;
       if (!moduleId) return undefined;
-      const module = RemoteModule.moduleById(moduleId);
+      const module = RemoteModule.moduleByOpaqueToken(moduleId);
       if (!module?.componentExists(wrapped.componentId)) {
         return undefined;
       }

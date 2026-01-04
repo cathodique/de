@@ -1,7 +1,10 @@
-import { WlSurface } from "@cathodique/wl-serv-high/dist/objects/wl_surface.js";
+import { WlSurface } from "@cathodique/wl-serv-high/objects";
 import { Seat } from "../../wayland/seat/seat.js";
 import { BaseDom } from "./base.js";
 import { Output } from "../../wayland/output/output.js";
+
+// HEY JULIETTE!! THIS IS WHERE WE AT
+// WE NEED TO CREATE THE ACTUAL COMPONENT, THEN HOOK IT UP!!
 
 export class SurfaceDom extends BaseDom<WlSurface, HTMLCanvasElement> {
   static wlToSurfaceDom = new Map<WlSurface, SurfaceDom>();
@@ -41,13 +44,11 @@ export class SurfaceDom extends BaseDom<WlSurface, HTMLCanvasElement> {
         b.updateBufferArea(rect.y, rect.x, rect.h, rect.w)
       }
       const arr = new Uint8ClampedArray(
-        b.buffer.buffer,
+        b.buffer.buffer as ArrayBuffer,
         0,
         b.meta.width * b.meta.height * 4,
       );
       if (arr.length > 0) {
-        // Idk what the f*** tsgo is doing here.... anyways
-        // @ts-ignore
         let imageData = new ImageData(arr, b.meta.width, b.meta.height);
 
         for (const rect of currlyDamagedBuffer) {
@@ -63,6 +64,8 @@ export class SurfaceDom extends BaseDom<WlSurface, HTMLCanvasElement> {
       // Unsure vvv
       this.dom.remove();
     });
+
+    // this.initSeatMouse();
   }
 
   initSeatMouse(seat: Seat) {

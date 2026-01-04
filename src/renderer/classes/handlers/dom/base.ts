@@ -1,4 +1,4 @@
-import { BaseObject } from "@cathodique/wl-serv-high/dist/objects/base_object.js";
+import { BaseObject } from "@cathodique/wl-serv-high/objects";
 
 export class BaseDom<From extends BaseObject, To extends Element> {
   wl: From;

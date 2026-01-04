@@ -67,10 +67,6 @@ export const registerProtocols = () => {
         return callback({ cancel: false });
       }
 
-      if (url.host.endsWith(".raytu.be") || url.host === "raytu.be") {
-        return callback({ cancel: false });
-      }
-
       // TODO: Handle permissions of each module. For now though...
       callback({ cancel: true });
     }

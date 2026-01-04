@@ -1,14 +1,15 @@
 import { parentIpc } from "../parentIpc.js";
 import { nanoid } from "../utils/utils.js";
+import { wrapValue } from "../utils/wrap.js";
 import { RemoteModule } from "./module.js";
 import { OrderedPeer } from "./orderedPeer.js";
 import z from "zod";
 
 export interface ComponentContext {
-  ipc: OrderedPeer;
+  peer: OrderedPeer;
 }
 export type ComponentHandle = {
-  ipc: OrderedPeer;
+  peer: OrderedPeer;
   componentId: string | Promise<string>;
 
   init(): any;
@@ -20,22 +21,22 @@ export abstract class Component extends EventTarget {
 
   static isComponentSymbol: typeof isComponentSymbol = isComponentSymbol;
   componentId: string;
-  ipc: OrderedPeer;
+  peer: OrderedPeer;
 
   [isComponentSymbol] = true;
   constructor(ctx: ComponentContext) {
     super();
-    this.ipc = ctx.ipc;
+    this.peer = ctx.peer;
     this.componentId = nanoid();
   }
 
   abstract init(): any;
 
   post(obj: Record<string, any>) {
-    return this.ipc.post({ ...obj, componentHandle: this.componentId });
+    return this.peer.post({ ...obj, componentHandle: this.componentId });
   }
   rpc(type: string, data: Record<string, any>, obj: Record<string, any> = {}) {
-    return this.ipc.rpc(type, data, { ...obj, componentHandle: this.componentId });
+    return this.peer.rpc(type, data, { ...obj, componentHandle: this.componentId });
   }
 
   async #getDependencyRpc(dependency: string) {
@@ -61,5 +62,37 @@ export abstract class Component extends EventTarget {
   async getAllDependency(dependency: string) {
     const handles = await this.#getAllDependencyRpc(dependency);
     return handles.map((v) => RemoteModule.getOrCreate(v.port, v.id).localHandle);
+  }
+
+  #listenersFromRemote = new Map<string, Set<OrderedPeer>>();
+  listenFor(eventName: string, peer: OrderedPeer) {
+    const innerSet = this.#listenersFromRemote.get(eventName) || new Set();
+    if (!this.#listenersFromRemote.has(eventName)) this.#listenersFromRemote.set(eventName, innerSet);
+
+    innerSet.add(peer);
+  }
+  unlistenFor(eventName: string, peer: OrderedPeer) {
+    const innerSet = this.#listenersFromRemote.get(eventName) || new Set();
+
+    innerSet.delete(peer);
+
+    if (innerSet.size === 0) this.#listenersFromRemote.delete(eventName);
+  }
+  async emit(eventName: string, args: any[]) {
+    const wrapped = args.map((v) => wrapValue(v))
+
+    const innerSet = this.#listenersFromRemote.get(eventName);
+    if (!innerSet) return;
+
+    await Promise.all(
+      [...innerSet]
+        .map((peer) =>
+          peer.rpc("emitEvent", {
+            componentId: this.componentId,
+            eventName: eventName,
+            args: wrapped,
+          })
+        ),
+    );
   }
 }

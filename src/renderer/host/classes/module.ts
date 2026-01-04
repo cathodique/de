@@ -10,7 +10,8 @@ import { CathodiqueProviderHandler } from "../ipcHandlers/cathodiqueProvider.js"
 import { ComponentInstanceProxy, ComponentListProxy, makeComponentProxy } from "../utils/remoteToLocalAdapter.js";
 import { WithTransfer } from "./withTransfer.js";
 import { orchestrator } from "./orchestrator.js";
-import { Component } from "./component.js";
+import { Component, ComponentHandle } from "./component.js";
+import z from "zod";
 
 /*
 Four cases.
@@ -43,12 +44,12 @@ export abstract class BaseModule {
     return window.origin;
   }
 
-  static getModule(moduleName: string) {
+  static async getModule(moduleName: string) {
     if (this.summonnedModules.has(moduleName)) {
       return this.summonnedModules.get(moduleName)!;
     }
 
-    return new RemoteModule(moduleName);
+    return RemoteModule.create(moduleName);
   }
 
   opaqueToken: string;
@@ -65,7 +66,8 @@ export abstract class BaseModule {
 
   abstract localHandle: ComponentListHandle;
   abstract getRemoteHandle(to: RemoteModule): MessagePort | Promise<MessagePort>;
-  abstract componentExists(id: string): boolean | Promise<boolean>;
+  abstract instanceExists(id: string): boolean | Promise<boolean>;
+  abstract getComponent(id: string): ComponentHandle | undefined | Promise<ComponentHandle | undefined>;
 }
 
 export class LocalModule extends BaseModule {
@@ -100,84 +102,72 @@ export class LocalModule extends BaseModule {
     return messageChannel.consumerPort;
   }
 
-  componentInstances = new Map<string, Component>();
-  componentExists(id: string) {
-    return this.componentInstances.has(id);
+  #componentInstances = new Map<string, Component>();
+  instanceExists(id: string) {
+    return this.#componentInstances.has(id);
   }
   register(id: string, comp: Component) {
-    this.componentInstances.set(id, comp);
+    this.#componentInstances.set(id, comp);
+  }
+  getComponent(id: string) {
+    return this.#componentInstances.get(id);
   }
 }
 
 export class RemoteModule extends BaseModule {
+  static iframeLoad(iframe: HTMLIFrameElement) {
+    return new Promise<void>((r) => {
+      iframe.addEventListener("load", () => r(), { once: true });
+    });
+  }
+  static moduleSubdomainOf(moduleName: string) {
+    return moduleName.split('.').toReversed().join('.');
+  }
+  // Init resolves latches: It's why it's hidden
+  static async create(moduleName: string) {
+    const moduleSubdomain = this.moduleSubdomainOf(moduleName);
+
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://${moduleSubdomain}.raytu.be/module.html`;
+    iframe.hidden = true;
+
+    document.body.append(iframe);
+
+    const win = iframe.contentWindow!;
+    OtherNodeRegistry.setRegistry(win, new OtherNodeRegistry(win));
+
+    return new RemoteModule(moduleName, iframe);
+  }
+
+  peer: OrderedPeer;
   iframe: HTMLIFrameElement;
-  #ipcLatch: Latch<OrderedPeer>;
-  get peer() { return this.#ipcLatch.promise }
-  #winLatch: Latch<WindowProxy>;
-  get win() { return this.#winLatch.promise }
+  get win() { return this.iframe.contentWindow! };
 
   componentList: ComponentListHandle;
-  constructor(moduleName: string) {
+  private constructor(moduleName: string, iframe: HTMLIFrameElement) {
     super(moduleName);
 
-    this.iframe = this.#createIframe();
-    document.body.append(this.iframe);
-
-    this.#ipcLatch = new Latch();
-    this.#winLatch = new Latch();
-
-    this.#init();
+    this.iframe = iframe;
 
     this.componentList = new ComponentListProxy();
+    this.peer = new OrderedPeer(
+      iframe.contentWindow!,
+      `https://${this.#moduleSubdomain}.raytu.be`,
+    );
+    this.peer.addHandler(new CathodiqueConsumerHandler(this));
+    this.peer.addHandler(new CathodiqueHostHandler(this));
+    this.peer.addHandler(new DOMHostHandler(this.win, this));
   }
 
   get #moduleSubdomain() {
-    return this.moduleName.split('.').toReversed().join('.');
+    return RemoteModule.moduleSubdomainOf(this.moduleName);
   }
   get origin() {
     return `https://${this.#moduleSubdomain}.raytu.be`;
   }
 
-  #createIframe() {
-    const iframe = document.createElement("iframe");
-    iframe.src = `https://${this.#moduleSubdomain}.raytu.be/module.html`;
-    iframe.hidden = true;
-
-    return iframe;
-  }
-
   #iframeLoaded = false
-  get iframeLoad() {
-    if (this.#iframeLoaded) return Promise.resolve();
-    return new Promise<void>((r) => {
-      this.iframe.addEventListener("load", () => r(), { once: true });
-    })
-      .then(function (this: RemoteModule) { this.#iframeLoaded = true; }.bind(this))
-  }
-
   componentReady = new KeyedLatch<string, void>();
-
-  // Init resolves latches: It's why it's hidden
-  async #init() {
-    await this.iframeLoad;
-
-    const win = this.iframe.contentWindow!;
-    this.#winLatch.resolve!(win);
-
-    const moduleSubdomain = this.moduleName.split('.').toReversed().join('.');
-
-    OtherNodeRegistry.setRegistry(win, new OtherNodeRegistry(win));
-
-    const ipc = new OrderedPeer(
-      this.iframe.contentWindow!,
-      `https://${moduleSubdomain}.raytu.be`,
-    );
-    ipc.addHandler(new CathodiqueConsumerHandler(this.componentReady));
-    ipc.addHandler(new CathodiqueHostHandler(this));
-    ipc.addHandler(new DOMHostHandler(win, this));
-
-    this.#ipcLatch.resolve!(ipc);
-  }
 
   async waitForComponent(componentName: string) {
     await this.componentReady.get(componentName);
@@ -197,8 +187,7 @@ export class RemoteModule extends BaseModule {
 
     const messageChannel = new SemanticMessageChannel();
 
-    const ipc = await this.#ipcLatch.promise;
-    await ipc.rpc("connectAsProvider",
+    await this.peer.rpc("connectAsProvider",
       new WithTransfer(
         { data: { port: messageChannel.providerPort, moduleToken: undefined } },
         [messageChannel.providerPort],
@@ -209,15 +198,44 @@ export class RemoteModule extends BaseModule {
   }
 
   async submitRemoteHandle(port: MessagePort, from: RemoteModule) {
-    const ipc = await this.#ipcLatch.promise;
-    await ipc.rpc("connectAsProvider",
+    await this.peer.rpc("connectAsProvider",
       new WithTransfer(
         { data: { port: port, moduleToken: from.opaqueToken } },
         [port],
       ));
   }
 
-  async componentExists(id: string) {
-    return await (await this.peer).rpc("componentExists", { componentId: id });
+  async instanceExists(id: string) {
+    return await this.peer.rpc("instanceExists", { componentId: id });
+  }
+  async getInstanceData(id: string) {
+    return await this.peer.rpc("getInstanceData", { componentId: id });
+  }
+
+  #componentInstances = new Map<string, ComponentInstanceProxy>();
+  instanceProxyExists(id: string) {
+    return this.#componentInstances.has(id);
+  }
+  getInstanceProxy(id: string) {
+    return this.#componentInstances.get(id);
+  }
+
+  registerInstanceProxy(id: string, comp: ComponentInstanceProxy) {
+    this.#componentInstances.set(id, comp);
+  }
+  async getComponent(id: string): Promise<ComponentInstanceProxy | undefined> {
+    if (this.#componentInstances.has(id)) return this.#componentInstances.get(id)!;
+
+    const componentData = z.union(
+      [
+        z.undefined(),
+        z.object({
+          componentName: z.string(),
+        }),
+      ]
+    ).parse(await this.getInstanceData(id));
+    if (componentData) {
+      return makeComponentProxy(this, componentData.componentName, { componentId: id });
+    }
   }
 }

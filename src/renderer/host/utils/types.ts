@@ -46,3 +46,6 @@ export interface HandlerContext {
   ipc: OrderedPeer;
   event: MessageEvent;
 }
+
+export type ComponentClass = new (...a: any[]) => Component;
+export type ComponentHandleClass = new (...a: any[]) => ComponentHandle;

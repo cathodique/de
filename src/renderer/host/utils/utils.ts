@@ -1,6 +1,12 @@
 let alphabet =
   "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 
+export class ShouldHaveBeenZodError extends Error {
+  constructor(message?: string) {
+    super(message || "This error should have been caught by zod");
+  }
+}
+
 export function nanoid(e = 21) {
   let t = "",
     r = crypto.getRandomValues(new Uint8Array(e));
@@ -15,10 +21,4 @@ export const host = hostList.join('.')
 
 export const hostWithoutSubdomain = `${location.protocol}//${hostList.join(".")}:${location.port}`;
 
-export function findWinIndex(win: WindowProxy) {
-  for (let i = 0; i < window.length; i += 1) {
-    if (window[i] === win) {
-      return i;
-    }
-  }
-}
+export const stringStartsWithDollar = (v: string): v is `$${string}` => v.startsWith("$");

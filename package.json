@@ -24,6 +24,7 @@
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
     "@types/electron": "^1.4.38",
+    "@types/events": "^3.0.3",
     "@types/node": "^22.10.2",
     "prettier": "3.7.4",
     "typescript": "^5.7.2"
@@ -36,6 +37,7 @@
     "@typescript/native-preview": "^7.0.0-dev.20251220.1",
     "electron": "35.6",
     "esbuild": "^0.27.2",
+    "events": "^3.3.0",
     "koffi": "^2.14.0",
     "node-abi": "^4.12.0",
     "xml-parser": "^1.2.1",

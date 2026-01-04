@@ -1,9 +1,8 @@
-import { Component, ComponentHandle } from "../classes/component.js";
+import { Component } from "../classes/component.js";
 import { ComponentListHandle } from "../classes/componentList.js";
 import { Latch, LatchState } from "../classes/latch.js";
 import { RemoteModule } from "../classes/module.js";
 import { OrderedPeer } from "../classes/orderedPeer.js";
-import { OtherNodeRegistry } from "../classes/sharedDomHost.js";
 import { unwrapValue, wrapValue } from "./wrap.js";
 
 export class ComponentListProxy implements ComponentListHandle {
@@ -15,7 +14,7 @@ export class ComponentListProxy implements ComponentListHandle {
 }
 
 export class ComponentInstance {
-  ipc: Promise<OrderedPeer>;
+  ipc: OrderedPeer;
 
   module: RemoteModule;
 
@@ -66,10 +65,14 @@ function generateCalledOrAwaited({ called, awaited }: { called: (...args: any[])
 }
 
 export function makeComponentProxy(module: RemoteModule, componentName: string, options: { componentId: string } | { args: any[] }): ComponentInstanceProxy {
+  if ("componentId" in options && module.instanceProxyExists(options.componentId)) {
+    return module.getInstanceProxy(options.componentId)!;
+  }
+
   const compInst = new ComponentInstance(module, componentName, options);
   compInst.init();
 
-  return new Proxy(compInst, {
+  const compInstProxy = new Proxy(compInst, {
     get(target, prop) {
       if (prop === Component.isComponentSymbol) return true;
 
@@ -81,7 +84,7 @@ export function makeComponentProxy(module: RemoteModule, componentName: string, 
         called: async function (...args: any[]) {
           const id = await compInst.componentId;
 
-          const val = await (await module.peer).rpc("callProperty", {
+          const val = await module.peer.rpc("callProperty", {
             methodName: prop,
             arguments: args.map((v) => wrapValue(v)),
             componentId: id,
@@ -92,7 +95,7 @@ export function makeComponentProxy(module: RemoteModule, componentName: string, 
         awaited: async () => {
           const id = await compInst.componentId;
 
-          const val = await (await module.peer).rpc("getProperty", {
+          const val = await module.peer.rpc("getProperty", {
             propertyName: prop,
             componentId: id,
           });
@@ -102,4 +105,10 @@ export function makeComponentProxy(module: RemoteModule, componentName: string, 
       });
     },
   }) as ComponentInstanceProxy;
+
+  (async () => {
+    const cid = await compInst.componentId;
+    module.registerInstanceProxy(cid, compInstProxy);
+  })();
+  return compInstProxy;
 }

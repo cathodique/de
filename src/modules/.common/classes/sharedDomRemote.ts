@@ -112,7 +112,7 @@ export class SharedDOM {
   static registerSubtree(node: Node) {
     const id = NodeRegistry.getId(node);
     if (node instanceof HTMLTemplateElement) this.registerSubtree(node.content);
-    node.childNodes.forEach(function (this: typeof SharedDOM, n: Node) { this.registerSubtree(n) }.bind(this));
+    node.childNodes.forEach((n: Node) => this.registerSubtree(n));
 
     parentIpc.post({
       type: "createNode",

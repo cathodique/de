@@ -1,5 +1,5 @@
-import { OutputConfiguration } from "@cathodique/wl-serv-high/dist/objects/wl_output.js";
-import { OutputRegistry } from "@cathodique/wl-serv-high/dist/registries/output.js";
+import { OutputConfiguration } from "@cathodique/wl-serv-high/objects";
+import { OutputRegistry } from "@cathodique/wl-serv-high/registries";
 
 export class Output {
   configToOutput = new Map<OutputConfiguration, Output>();

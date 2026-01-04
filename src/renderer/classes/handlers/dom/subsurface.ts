@@ -1,7 +1,7 @@
-import { WlSubsurface } from "@cathodique/wl-serv-high/dist/objects/wl_subsurface.js";
+import { WlSubsurface } from "@cathodique/wl-serv-high/objects";
 import { BaseDom } from "./base.js";
 import { SurfaceDom } from "./surface.js";
-import { WlSurface } from "@cathodique/wl-serv-high/dist/objects/wl_surface.js";
+import { WlSurface } from "@cathodique/wl-serv-high/objects";
 
 export class SubsurfaceDom extends BaseDom<WlSubsurface, HTMLDivElement> {
   static wlToSubsurfaceDom = new Map<WlSubsurface, SubsurfaceDom>();

@@ -1,6 +1,8 @@
 import { nanoid } from "../utils/utils.js";
+import { wrapValue } from "../utils/wrap.js";
 import { BaseModule, LocalModule } from "./module.js";
 import { orchestrator } from "./orchestrator.js";
+import { OrderedPeer } from "./orderedPeer.js";
 
 export interface ComponentContext {
   module: BaseModule;
@@ -28,14 +30,41 @@ export class Component extends EventTarget {
     this.module = module;
   }
 
-  init() {}
+  async init() {}
 
-  getDependency(dependency: string) {
-    const newMod = orchestrator.load(dependency);
+  async getDependency(dependency: string) {
+    const newMod = await orchestrator.load(dependency);
     return newMod?.localHandle;
   }
-  getAllDependency(dependency: string) {
-    const newMod = orchestrator.loadAll(dependency);
+  async getAllDependency(dependency: string) {
+    const newMod = await orchestrator.loadAll(dependency);
     return newMod?.map((v) => v.localHandle);
+  }
+  #listenersFromRemote = new Map<string, Set<OrderedPeer>>();
+  listenFor(eventName: string, peer: OrderedPeer) {
+    const innerSet = this.#listenersFromRemote.get(eventName) || new Set();
+    if (!this.#listenersFromRemote.has(eventName)) this.#listenersFromRemote.set(eventName, innerSet);
+
+    innerSet.add(peer);
+  }
+  unlistenFor(eventName: string, peer: OrderedPeer) {
+    const innerSet = this.#listenersFromRemote.get(eventName) || new Set();
+
+    innerSet.delete(peer);
+
+    if (innerSet.size === 0) this.#listenersFromRemote.delete(eventName);
+  }
+  emit(eventName: string, args: any[]) {
+    const wrapped = args.map((v) => wrapValue(v))
+
+    const innerSet = this.#listenersFromRemote.get(eventName);
+    if (!innerSet) return;
+    for (const peer of innerSet) {
+      peer.rpc("emitEvent", {
+        componentId: this.componentId,
+        eventName: eventName,
+        args: wrapped,
+      });
+    }
   }
 };

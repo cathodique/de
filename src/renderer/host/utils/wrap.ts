@@ -56,7 +56,7 @@ export async function unwrapValue(value: any, fromModule: RemoteModule) {
     case "component":
       const moduleId = wrapped.moduleId || fromModule.opaqueToken;
       const module = BaseModule.moduleById(moduleId);
-      if (!module?.componentExists(wrapped.componentId)) {
+      if (!module?.instanceExists(wrapped.componentId)) {
         return undefined;
       }
       // if (module instanceof remote)

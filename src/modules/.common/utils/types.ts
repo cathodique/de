@@ -1,5 +1,6 @@
 import z from "zod";
 import { OrderedPeer } from "../classes/orderedPeer";
+import { Component, ComponentHandle } from "../classes/component";
 
 export interface ElementFromIpc {
   kind: "element";
@@ -37,3 +38,6 @@ export interface HandlerContext {
   ipc: OrderedPeer;
   event: MessageEvent;
 }
+
+export type ComponentClass = new (...a: any[]) => Component;
+export type ComponentHandleClass = new (...a: any[]) => ComponentHandle;

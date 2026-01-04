@@ -17,10 +17,10 @@ export class Latch<T> {
       // Assignment with side effect onto resultingResolve
       this.promise = new Promise<T>((r) => { resultingResolve = r });
 
-      this.resolve = function (this: Latch<T>, r: T) {
+      this.resolve = (r: T) => {
         resultingResolve(r);
         this.resolve = undefined;
-      }.bind(this);
+      };
     }
   }
 

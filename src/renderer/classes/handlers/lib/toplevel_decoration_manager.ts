@@ -1,4 +1,4 @@
-import { ZxdgToplevelDecorationV1 } from "@cathodique/wl-serv-high/dist/objects/zxdg_decoration_manager_v1.js";
+import { ZxdgToplevelDecorationV1 } from "@cathodique/wl-serv-high/objects";
 
 export class ZxdgToplevelDecorationManager {
   wl: ZxdgToplevelDecorationV1;

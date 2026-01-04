@@ -1,4 +1,4 @@
-import { WlSurface } from "@cathodique/wl-serv-high/dist/objects/wl_surface.js";
+import { WlSurface } from "@cathodique/wl-serv-high/objects";
 import { PopupDom } from "./dom/popup.js";
 import { ToplevelDom } from "./dom/toplevel.js";
 

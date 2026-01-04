@@ -1,5 +1,5 @@
 import { BaseDom } from "./base.js";
-import { XdgPopup } from "@cathodique/wl-serv-high/dist/objects/xdg_popup.js";
+import { XdgPopup } from "@cathodique/wl-serv-high/objects";
 
 // Toplevels: context for other subsurfaces to appear in
 // Popups are the same

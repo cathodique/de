@@ -50,9 +50,9 @@ export class Orchestrator {
     const moduleNames = overriddenBy ?? this.data.defaultsAll[schemaName];
     if (!moduleNames) return undefined;
 
-    return moduleNames.map(function (this: Orchestrator, moduleName: string) {
+    return Promise.all(moduleNames.map(function (this: Orchestrator, moduleName: string) {
       return BaseModule.getModule(moduleName)!;
-    });
+    }));
   }
 }
 

@@ -21,7 +21,7 @@ export class CathodiqueHostHandler {
     }).parse(arg));
   }
   async #getDependency({ data }: { data: { dependency: string } }) {
-    const module = orchestrator.load(data.dependency);
+    const module = await orchestrator.load(data.dependency);
 
     if (!module) return undefined;
 
@@ -39,7 +39,7 @@ export class CathodiqueHostHandler {
     }).parse(arg));
   }
   async #getAllDependency({ data }: { data: { dependency: string } }) {
-    const modules = orchestrator.loadAll(data.dependency);
+    const modules = await orchestrator.loadAll(data.dependency);
 
     if (!modules) return [];
 
