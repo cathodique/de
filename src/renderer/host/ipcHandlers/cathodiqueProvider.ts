@@ -113,7 +113,7 @@ export class CathodiqueProviderHandler {
     const component = this.#componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.listenFor(data.eventName, await this.#fromModule.peer);
+    component.listenFor(data.eventName, this.#fromModule.peer);
   }
 
   unlistenToEvent(arg: Record<string, any>) {
@@ -133,6 +133,6 @@ export class CathodiqueProviderHandler {
     const component = this.#componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.unlistenFor(data.eventName, await this.#fromModule.peer);
+    component.unlistenFor(data.eventName, this.#fromModule.peer);
   }
 };
