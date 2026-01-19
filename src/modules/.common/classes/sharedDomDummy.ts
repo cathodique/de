@@ -1,10 +1,14 @@
-export class DummyNodeRegistry {
-  static registryPerSource = new WeakMap<MessageEventSource, DummyNodeRegistry>();
+import { parentIpc } from "../parentIpc";
+import { OrderedPeer } from "./orderedPeer";
+import { NodeRegistry, SharedDOM } from "./sharedDomRemote";
 
-  static registryOf(source: MessageEventSource) {
+export class DummyNodeRegistry {
+  static registryPerSource = new WeakMap<OrderedPeer, DummyNodeRegistry>();
+
+  static registryOf(source: OrderedPeer) {
     return this.registryPerSource.get(source);
   }
-  static setRegistry(source: MessageEventSource, nr: DummyNodeRegistry) {
+  static setRegistry(source: OrderedPeer, nr: DummyNodeRegistry) {
     if (DummyNodeRegistry.registryPerSource.has(source)) throw new Error("Only one NodeRegistry per window may exist");
     return this.registryPerSource.set(source, nr);
   }
@@ -12,23 +16,29 @@ export class DummyNodeRegistry {
   nodeToId = new WeakMap<Node, string>();
   idToNode = new Map<string, WeakRef<Node>>();
 
-  source: MessageEventSource;
+  source: OrderedPeer;
 
-  constructor(source: MessageEventSource) {
+  constructor(source: OrderedPeer) {
     this.source = source;
-    DummyNodeRegistry.setRegistry(source, this);
   }
 
   hasNode(node: Node) {
     return this.nodeToId.has(node);
   }
-  getNode(id: string) {
+  async getNode(id: string) {
     if (this.idToNode.has(id)) {
       const result = this.idToNode.get(id)!.deref();
       if (result) return result;
     }
 
     const node = document.createElement("div");
+
+    const actualId = await SharedDOM.initOrGet(node);
+    await parentIpc.rpc("containForeign", {
+      id: actualId,
+      toId: id,
+      toOpaqueToken: this.source.opaqueToken,
+    });
 
     this.nodeToId.set(node, id);
     this.idToNode.set(id, new WeakRef(node));

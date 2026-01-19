@@ -1,5 +1,4 @@
-import { OutputConfiguration } from "@cathodique/wl-serv-high/objects";
-import { OutputRegistry } from "@cathodique/wl-serv-high/registries";
+import { OutputConfiguration, OutputRegistry } from "@cathodique/wl-serv-high/registries";
 
 export class Output {
   configToOutput = new Map<OutputConfiguration, Output>();
@@ -22,11 +21,12 @@ export class Output {
 
   initOutput() {
     this.dom.style.position = "absolute";
+    this.dom.style.pointerEvents = "none";
     this.dom.style.top = `${this.config.x}px`;
     this.dom.style.left = `${this.config.y}px`;
     this.dom.style.width = `${this.config.w}px`;
     this.dom.style.height = `${this.config.h}px`;
 
-    document.body.querySelector('main')!.append(this.dom);
+    document.body.append(this.dom);
   }
 }

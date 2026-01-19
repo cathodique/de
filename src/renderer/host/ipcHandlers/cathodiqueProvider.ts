@@ -2,35 +2,37 @@ import z from "zod";
 import { LocalModule, RemoteModule } from "../classes/module.js";
 import { HandlerContext } from "../utils/types.js";
 import { unwrapValue, WrappedValue, wrapValue, zodWrappedValue } from "../utils/wrap.js";
-import { Component, ComponentHandle } from "../classes/component.js";
 import { ShouldHaveBeenZodError, stringStartsWithDollar } from "../utils/utils.js";
+import { OrderedPeer } from "../classes/orderedPeer.js";
 
 export class CathodiqueProviderHandler {
   [k: string]: (arg: Record<string, any>, ctx: HandlerContext) => any;
 
   #toModule: LocalModule;
   #fromModule: RemoteModule;
-  constructor(fromModule: RemoteModule, toModule: LocalModule) {
+  #peer: OrderedPeer;
+  constructor(fromModule: RemoteModule, toModule: LocalModule, peer: OrderedPeer) {
     this.#fromModule = fromModule;
     this.#toModule = toModule;
+    this.#peer = peer;
+
+    this.#init();
+  }
+  async #init() {
+    await this.#toModule.localHandle.ready;
+    await this.#peer.rpc("moduleReady", {
+      componentList: [...this.#toModule.localHandle.componentClasses.keys()],
+    });
   }
 
-  static #componentInstancesByModule = new Map<LocalModule, Map<string, Component>>();
-  get #componentInstances() {
-    const result = CathodiqueProviderHandler.#componentInstancesByModule.get(this.#toModule) || new Map<string, Component>();
-    if (!CathodiqueProviderHandler.#componentInstancesByModule.has(this.#toModule)) {
-      CathodiqueProviderHandler.#componentInstancesByModule.set(this.#toModule, result);
-    }
-    return result;
-  }
-  #componentExists(id: string) {
-    this.#componentInstances.has(id);
+  get #componentList() {
+    return this.#toModule.localHandle;
   }
 
   createInstance(arg: Record<string, any>) {
     return this.#createInstance(z.object({
       data: z.object({
-        className: z.string().refine(this.#toModule.localHandle.has),
+        className: z.string().refine((className) => this.#toModule.localHandle.has(className)),
         args: z.array(zodWrappedValue),
       }),
     }).parse(arg));
@@ -38,34 +40,58 @@ export class CathodiqueProviderHandler {
   async #createInstance({ data }: { data: { className: string; args: WrappedValue[] } }) {
     // TODO Obj verification
     const ClassObj = this.#toModule.localHandle.get(data.className);
-    if (!ClassObj) return; // Quiet fail
+    if (!ClassObj) throw new Error("No such component");
 
-    const unwrapped = await Promise.all(data.args.map(async function (this: CathodiqueProviderHandler, v: WrappedValue) {
-      return unwrapValue(v, this.#fromModule)
-    }.bind(this)));
-    const componentInstance = new ClassObj(...unwrapped);
+    const unwrapped = await Promise.all(data.args.map(async (v: WrappedValue) => unwrapValue(v, this.#fromModule)));
+
+    const componentInstance = await ClassObj.create(...unwrapped);
 
     await componentInstance.init();
+    return componentInstance.componentId;
+  }
 
-    this.#componentInstances.set(componentInstance.componentId, componentInstance);
-    return;
+  instanceExists(arg: Record<string, any>) {
+    return this.#instanceExists(z.object({
+      data: z.object({
+        componentId: z.string(),
+      }),
+    }).parse(arg));
+  }
+  #instanceExists({ data }: { data: { componentId: string } }) {
+    return this.#componentList.instanceExists(data.componentId);
+  }
+
+  getInstanceData(arg: Record<string, any>) {
+    return this.#getInstanceData(z.object({
+      data: z.object({
+        componentId: z.string(),
+      }),
+    }).parse(arg));
+  }
+  #getInstanceData({ data }: { data: { componentId: string } }) {
+    const instance = this.#componentList.componentInstances.get(data.componentId);
+    return instance && {
+      componentName: this.#toModule.localHandle.componentTypeOf(instance),
+    };
   }
 
   getProperty(arg: Record<string, any>) {
     return this.#getProperty(z.object({
       data: z.object({
         propertyName: z.string().startsWith("$"),
-        componentId: z.string().refine(this.#componentExists),
+        componentId: z.string().refine((cId) => this.#componentList.instanceExists(cId)),
       }),
     }).parse(arg));
   }
   async #getProperty({ data }: { data: { propertyName: string; componentId: string } }) {
-    const component = this.#componentInstances.get(data.componentId);
+    const component = this.#componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
     const propertyName = data.propertyName;
     if (!stringStartsWithDollar(propertyName)) throw new ShouldHaveBeenZodError();
     const value = component[propertyName];
+
+    console.log({ value });
 
     return wrapValue(value);
   }
@@ -75,7 +101,7 @@ export class CathodiqueProviderHandler {
       data: z.object({
         methodName: z.string(),
         arguments: z.array(z.any()),
-        componentId: z.string().refine(this.#componentExists),
+        componentId: z.string().refine((cId) => this.#componentList.instanceExists(cId)),
       }),
     }).parse(arg));
   }
@@ -86,7 +112,7 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = this.#componentInstances.get(data.componentId);
+    const component = this.#componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
     const methodName = data.methodName;
@@ -99,8 +125,8 @@ export class CathodiqueProviderHandler {
   listenToEvent(arg: Record<string, any>) {
     return this.#listenToEvent(z.object({
       data: z.object({
-        eventName: z.string().startsWith("$"),
-        componentId: z.string().refine(this.#componentExists),
+        eventName: z.string(),
+        componentId: z.string().refine((cId) => this.#componentList.instanceExists(cId)),
       }),
     }).parse(arg));
   }
@@ -110,17 +136,17 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = this.#componentInstances.get(data.componentId);
+    const component = this.#componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.listenFor(data.eventName, this.#fromModule.peer);
+    component.listenFor(data.eventName, this.#peer);
   }
 
   unlistenToEvent(arg: Record<string, any>) {
     return this.#unlistenToEvent(z.object({
       data: z.object({
         eventName: z.string(),
-        componentId: z.string().refine(this.#componentExists),
+        componentId: z.string().refine((cId) => this.#componentList.instanceExists(cId)),
       }),
     }).parse(arg));
   }
@@ -130,9 +156,9 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = this.#componentInstances.get(data.componentId);
+    const component = this.#componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.unlistenFor(data.eventName, this.#fromModule.peer);
+    component.unlistenFor(data.eventName, this.#peer);
   }
 };

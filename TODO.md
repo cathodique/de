@@ -6,3 +6,6 @@
 
 # To consider
 - Should cathodique events follow $ also?
+
+# Long term
+LT-TODO

@@ -3,9 +3,9 @@ import { componentList, ComponentList } from "../classes/componentList.js";
 import { HandlerContext } from "../utils/types.js";
 import { unwrapValue, WrappedValue, wrapValue, zodWrappedValue } from "../utils/wrap.js";
 import { Component } from "../classes/component.js";
-import { RemoteModule } from "../classes/module.js";
 import { ShouldHaveBeenZodError, stringStartsWithDollar } from "../utils/utils.js";
 import { parentIpc } from "../parentIpc.js";
+import { OrderedPeer } from "../classes/orderedPeer.js";
 
 // DISTINCTIONS WITH HOST
 // A single module has a single componentList
@@ -21,37 +21,40 @@ export class CathodiqueProviderHandler {
 
   static #componentList: ComponentList = componentList;
 
-  static #componentInstances = new Map<string, Component>();
-  static componentExists(id: string) {
-    return this.#componentInstances.has(id);
-  }
+  #peer: OrderedPeer;
+  constructor(peer: OrderedPeer) {
+    this.#peer = peer;
 
-  #fromModule: RemoteModule | undefined;
-  constructor(fromModule: RemoteModule | undefined) {
-    this.#fromModule = fromModule;
+    this.#init();
+  }
+  async #init() {
+    await componentList.ready;
+    await this.#peer.rpc("moduleReady", {
+      componentList: [...componentList.componentClasses.keys()],
+    });
   }
 
   createInstance(arg: Record<string, any>) {
     return this.#createInstance(z.object({
       data: z.object({
-        className: z.string().refine(CathodiqueProviderHandler.#componentList.has),
+        className: z.string().refine(CathodiqueProviderHandler.#componentList.has
+          .bind(CathodiqueProviderHandler.#componentList)),
         args: z.array(zodWrappedValue),
       }),
     }).parse(arg));
   }
   async #createInstance({ data }: { data: { className: string, args: WrappedValue[] } }) {
+    // alert(1);
     const ClassObj = CathodiqueProviderHandler.#componentList.get(data.className);
     if (!ClassObj) throw new ShouldHaveBeenZodError();
 
-    const unwrapped = data.args.map((v: WrappedValue) => unwrapValue(v, this.#fromModule));
-    const componentInstance = new ClassObj(...unwrapped) as Component;
+    const unwrapped = await Promise.all(data.args.map((v: WrappedValue) => unwrapValue(v, this.#peer)));
+    const pctx = {};
+
+    const componentInstance = (await ClassObj.create(pctx, ...unwrapped)) as Component;
 
     await componentInstance.init();
 
-    CathodiqueProviderHandler.#componentInstances.set(
-      componentInstance.componentId,
-      componentInstance,
-    );
     return componentInstance.componentId;
   }
 
@@ -63,7 +66,7 @@ export class CathodiqueProviderHandler {
     }).parse(arg));
   }
   #instanceExists({ data }: { data: { componentId: string } }) {
-    return CathodiqueProviderHandler.#componentInstances.has(data.componentId);
+    return componentList.componentInstances.has(data.componentId);
   }
 
   getInstanceData(arg: Record<string, any>) {
@@ -74,7 +77,7 @@ export class CathodiqueProviderHandler {
     }).parse(arg));
   }
   #getInstanceData({ data }: { data: { componentId: string } }) {
-    const instance = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
+    const instance = componentList.componentInstances.get(data.componentId);
     return instance && {
       componentName: componentList.componentTypeOf(instance),
     };
@@ -84,12 +87,13 @@ export class CathodiqueProviderHandler {
     return this.#getProperty(z.object({
       data: z.object({
         propertyName: z.string().startsWith("$"),
-        componentId: z.string().refine(CathodiqueProviderHandler.componentExists),
+        componentId: z.string().refine(componentList.instanceExists
+          .bind(componentList)),
       }),
     }).parse(arg));
   }
   async #getProperty({ data }: { data: { propertyName: string; componentId: string } }) {
-    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
+    const component = componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
     // Zod...
@@ -106,7 +110,8 @@ export class CathodiqueProviderHandler {
       data: z.object({
         methodName: z.string().startsWith('$'),
         arguments: z.array(z.any()),
-        componentId: z.string().refine(CathodiqueProviderHandler.componentExists),
+        componentId: z.string().refine(componentList.instanceExists
+          .bind(componentList)),
       }),
     }).parse(arg));
   }
@@ -117,7 +122,7 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId)!;
+    const component = componentList.componentInstances.get(data.componentId)!;
 
     // Zod...
     const methodName = data.methodName;
@@ -142,17 +147,18 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
+    const component = componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.listenFor(data.eventName, this.#fromModule?.peer ?? parentIpc);
+    component.listenFor(data.eventName, this.#peer ?? parentIpc);
   }
 
   unlistenToEvent(arg: Record<string, any>) {
     return this.#unlistenToEvent(z.object({
       data: z.object({
         eventName: z.string(),
-        componentId: z.string().refine(CathodiqueProviderHandler.componentExists),
+        componentId: z.string().refine(componentList.instanceExists
+          .bind(componentList)),
       }),
     }).parse(arg));
   }
@@ -162,9 +168,9 @@ export class CathodiqueProviderHandler {
       componentId: string;
     };
   }) {
-    const component = CathodiqueProviderHandler.#componentInstances.get(data.componentId);
+    const component = componentList.componentInstances.get(data.componentId);
     if (!component) throw new ShouldHaveBeenZodError();
 
-    component.unlistenFor(data.eventName, this.#fromModule?.peer ?? parentIpc);
+    component.unlistenFor(data.eventName, this.#peer ?? parentIpc);
   }
 };

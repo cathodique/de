@@ -7,39 +7,47 @@
 	<script src="/.common/setup.js" type="module"></script>
 </head>
 <body>
-    <template id="window_manager">
-
-    </template>
+    <div id="window_manager">
+        <p>Hello World</p>
+    </div>
     <script type="module">
-        import { Component, componentList } from "/.common/bundle.js";
+        import { Component, componentList, Resolver } from "/.common/bundle.js";
 
-        class WindowFrame extends Component {
-            $output = document.querySelector("#window_frame").content.cloneNode(true);
+        class WindowManager extends Component {
+            $output = document.querySelector("#window_manager").cloneNode(true);
 
             #windowFrameModule;
-            windowFrames = new Map(); // from WindowComponent to
+            #windowRegistry;
+            windowFrames = new Map(); // Window to WindowFrame
 
-            constructor() {
-                super();
+            static async create() {
+                const windowFrameModule = await Resolver.getDependency("WindowFrame");
+                const windowRegistry = await Resolver.summon("Cathodique::Window.WindowRegistry");
 
-                this.#windowFrameModule = this.getDependency("WindowFrame");
-
-                console.log('HELLO WORLD!!!');
-                this.$template.querySelector("p").addEventListener("mousemove", (e) => {
-                  console.log(e);
-                });
+                return new WindowManager(windowFrameModule, windowRegistry);
             }
 
-            async $spawnWindow(window) {
+            constructor(windowFrameModule, windowRegistry) {
+                super();
+
+                // windowRegistry.$hello();
+
+                this.#windowFrameModule = windowFrameModule;
+                this.#windowRegistry = windowRegistry;
+
+                this.#windowRegistry.on("newWindow", this.newWindow.bind(this));
+            }
+            async newWindow(window) {
                 // window is a window component :3
                 const WindowFrame = this.#windowFrameModule.get("WindowFrame");
-                const windowFrame = new WindowFrame(window);
+                const windowFrame = await WindowFrame.create(window);
+                this.windowFrames.set(window, windowFrame);
 
                 this.$output.append(await windowFrame.$output);
             }
         }
-
-        componentList.register("WindowFrame", WindowFrame);
+        componentList.register("WindowManager", WindowManager);
+        componentList.markReady();
     </script>
 </body>
 </html>

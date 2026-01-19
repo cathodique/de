@@ -9,8 +9,12 @@ export class CathodiqueHostHandler {
 
   #mod: RemoteModule;
 
-  constructor (mod: RemoteModule) {
+  constructor(mod: RemoteModule) {
     this.#mod = mod;
+
+    this.#mod.peer.rpc("moduleId", {
+      moduleId: this.#mod.opaqueToken,
+    });
   }
 
   getDependency(arg: Record<string, any>) {
@@ -23,12 +27,30 @@ export class CathodiqueHostHandler {
   async #getDependency({ data }: { data: { dependency: string } }) {
     const module = await orchestrator.load(data.dependency);
 
-    if (!module) return undefined;
+    if (!module) throw new Error("No such module");
 
     const consumerPort = await module.getRemoteHandle(this.#mod);
     const moduleId = module.opaqueToken;
 
-    return new WithTransfer({ port: consumerPort, id: moduleId }, [consumerPort]);
+    return new WithTransfer({ port: consumerPort, id: moduleId }, consumerPort ? [consumerPort] : []);
+  }
+
+  getModuleByToken(arg: Record<string, any>) {
+    return this.#getModuleByToken(z.object({
+      data: z.object({
+        opaqueToken: z.string(),
+      }),
+    }).parse(arg));
+  }
+  async #getModuleByToken({ data }: { data: { opaqueToken: string } }) {
+    const module = RemoteModule.moduleByToken(data.opaqueToken);
+
+    if (!module) throw new Error("No such module");
+
+    const consumerPort = await module.getRemoteHandle(this.#mod);
+    const moduleId = module.opaqueToken;
+
+    return new WithTransfer({ port: consumerPort, id: moduleId }, consumerPort ? [consumerPort] : []);
   }
 
   getAllDependency(arg: Record<string, any>) {
@@ -48,7 +70,7 @@ export class CathodiqueHostHandler {
     // Map with side effect
     const handles = await Promise.all(modules.map(async function (this: CathodiqueHostHandler, mod: BaseModule) {
       const messagePort = await mod.getRemoteHandle(this.#mod);
-      messagePorts.push(messagePort);
+      if (messagePort) messagePorts.push(messagePort);
 
       return { port: messagePort, id: mod.opaqueToken };
     }.bind(this)));
@@ -56,19 +78,19 @@ export class CathodiqueHostHandler {
     return new WithTransfer(handles, [handles]);
   }
 
-  establishConnection(arg: Record<string, any>) {
-    return this.#establishConnection(z.object({
-      data: z.object({
-        from: z.string().refine((v) => RemoteModule.moduleById(v)),
-        to: z.string().refine((v) => RemoteModule.moduleById(v)),
-      }),
-    }).parse(arg));
-  }
-  async #establishConnection({ data }: { data: { from: string, to: string } }) {
-    const fromModule = BaseModule.moduleById(data.from)! as RemoteModule;
-    const toModule = BaseModule.moduleById(data.to)! as RemoteModule;
+  // establishConnection(arg: Record<string, any>) {
+  //   return this.#establishConnection(z.object({
+  //     data: z.object({
+  //       from: z.string().refine((v) => RemoteModule.moduleById(v)),
+  //       to: z.string().refine((v) => RemoteModule.moduleById(v)),
+  //     }),
+  //   }).parse(arg));
+  // }
+  // async #establishConnection({ data }: { data: { from: string, to: string } }) {
+  //   const fromModule = BaseModule.moduleById(data.from)! as RemoteModule;
+  //   const toModule = BaseModule.moduleById(data.to)! as RemoteModule;
 
-    const port = await fromModule.getRemoteHandle(toModule);
-    await toModule.submitRemoteHandle(port, fromModule);
-  }
+  //   const port = await fromModule.getRemoteHandle(toModule);
+  //   await toModule.submitRemoteHandle(port, fromModule);
+  // }
 };

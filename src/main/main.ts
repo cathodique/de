@@ -5,10 +5,8 @@ import { registerProtocols } from "./protocols.js";
 
 const createWindow = () => {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
-    fullscreen: true,
-    resizable: false,
+    // fullscreen: true,
+    // resizable: false,
     webPreferences: {
       nodeIntegration: true,
       nodeIntegrationInSubFrames: false,
@@ -18,7 +16,7 @@ const createWindow = () => {
 
   registerProtocols();
 
-  // win.webContents.openDevTools();
+  win.webContents.openDevTools({ mode: "detach" });
   win.loadURL("app://top/index.html");
 };
 

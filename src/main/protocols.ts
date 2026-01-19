@@ -43,7 +43,6 @@ export const registerProtocols = () => {
 
     switch (domain) {
       case "raytu.be": {
-        console.log(reqUrl.pathname);
         if (reqUrl.pathname.startsWith('/.common/')) {
           return net.fetch(pathToFileURL(join(__dirname, '../modules', reqUrl.pathname)).toString());
         }

@@ -7,33 +7,31 @@
 	<script src="/.common/setup.js" type="module"></script>
 </head>
 <body>
-    <template id="window_frame">
+    <div id="window_frame">
+        <link rel="stylesheet" href="./style.css" />
         <p>
             Hello World
         </p>
-    </template>
+    </div>
     <script type="module">
         import { Component, componentList } from "/.common/bundle.js";
 
         class WindowFrame extends Component {
-            template = document.querySelector("#window_frame").content.cloneNode(true);
-            hello = "world";
+            $output = document.querySelector("#window_frame").cloneNode(true);
+            window;
 
-            constructor(ipc) {
+            constructor(ipc, window) {
                 super(ipc);
-                console.trace();
-                console.log('HELLO WORLD!!!');
-                this.template.querySelector("p").addEventListener("mousemove", (e) => {
-                  console.log(e);
-                });
+                this.window = window;
             }
 
-            rpcSetGeometry() {
-
+            async init() {
+                this.$output.append(await this.window.$output);
             }
         }
 
         componentList.register("WindowFrame", WindowFrame);
+        componentList.markReady();
     </script>
 </body>
 </html>

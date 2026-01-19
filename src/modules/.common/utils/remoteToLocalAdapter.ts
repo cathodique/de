@@ -7,10 +7,21 @@ import { unwrapValue, wrapValue } from "./wrap.js";
 import { EventEmitter } from "events";
 
 export class ComponentListProxy implements ComponentListHandle {
-  componentClasses = new Map<string, new () => ComponentInstanceProxy>();
+  #module: RemoteModule;
+  constructor(mod: RemoteModule) {
+    this.#module = mod;
+  }
 
   get(componentName: string) {
-    return this.componentClasses.get(componentName);
+    const availableComponents = this.#module.availableComponents;
+
+    if (!availableComponents.includes(componentName)) return undefined;
+
+    return {
+      create: (...args: any[]) => {
+        return makeComponentProxy(this.#module, componentName, { args });
+      }
+    };
   }
 }
 
@@ -57,20 +68,23 @@ export class ComponentInstance extends EventEmitter {
 
   async init() {
     if (this.#cidLatch.getState() === LatchState.Pending) {
-      await this.module.waitForComponent(this.componentName);
+      if (!this.module.availableComponents.includes(this.componentName)) {
+        throw new Error(`"${this.componentName}" not provided by module`);
+      }
 
-      await this.module.componentReady.get(this.componentName);
       const componentId = await this.peer.rpc("createInstance", {
         className: this.componentName,
-        args: this.#args.map((v) => wrapValue(v)),
+        args: await Promise.all(this.#args.map((v) => wrapValue(v))),
       });
       this.#cidLatch.resolve!(componentId);
       this.ready.resolve!();
+    } else {
+      this.ready.resolve?.();
     }
   }
 }
 export type ComponentInstanceProxy = ComponentInstance
-  & Partial<Record<string, any>>
+  & Partial<Record<`$${string}`, any>>
   & { [Component.isComponentSymbol]: true };
 
 function generateCalledOrAwaited({ called, awaited }: { called: (...args: any[]) => any, awaited: () => any }) {
@@ -109,7 +123,7 @@ export function makeComponentProxy(module: RemoteModule, componentName: string, 
             componentId: id,
           });
 
-          return unwrapValue(val, module);
+          return await unwrapValue(val, module.peer);
         },
         awaited: async () => {
           const id = await compInst.componentId;
@@ -119,7 +133,7 @@ export function makeComponentProxy(module: RemoteModule, componentName: string, 
             componentId: id,
           });
 
-          return unwrapValue(val, module);
+          return await unwrapValue(val, module.peer);
         },
       });
     },

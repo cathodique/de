@@ -1,10 +1,12 @@
 import z from "zod";
 import { OrderedPeer } from "../classes/orderedPeer";
+import { Component, ComponentHandle } from "../classes/component";
+import { ComponentInstanceProxy } from "./remoteToLocalAdapter";
 
 export const zodElementFromIpc = z.object({
   kind: z.literal("element"),
   tagName: z.string(),
-  attributes: z.tuple([ z.string(), z.string(), z.string() ]),
+  attributes: z.array(z.tuple([ z.string().nullable(), z.string(), z.string() ])),
   children: z.array(z.string()),
   content: z.string().optional(),
 });
@@ -47,5 +49,19 @@ export interface HandlerContext {
   event: MessageEvent;
 }
 
-export type ComponentClass = new (...a: any[]) => Component;
-export type ComponentHandleClass = new (...a: any[]) => ComponentHandle;
+export const componentTypes = [
+  "NORMAL",
+  "SINGLETON",
+  "REF_ONLY",
+] as const;
+
+export type FactoryOf<T extends ComponentHandle, U extends any[]> = { create(...args: U): T | Promise<T> };
+export type ComponentFactory<T extends any[] = any[]> = FactoryOf<Component, T>;
+export type ComponentHandleFactory<T extends any[] = any[]> = FactoryOf<ComponentHandle, T>;
+export type ComponentInstanceProxyFactory<T extends any[] = any[]> = FactoryOf<ComponentInstanceProxy, T>;
+
+export type ClassOf<T extends ComponentHandle, U extends any[]> = (FactoryOf<T, U> | (new (...args: U) => T))
+  & { type: typeof componentTypes[number], singletonInstance?: T };
+export type ComponentClass<T extends any[] = any[]> = ClassOf<Component, T>;
+export type ComponentHandleClass<T extends any[] = any[]> = ClassOf<ComponentHandle, T>;
+export type ComponentInstanceProxyClass<T extends any[] = any[]> = ClassOf<ComponentInstanceProxy, T>;

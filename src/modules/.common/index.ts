@@ -11,3 +11,4 @@ OrderedPeer.registerIpcListener();
 
 export { Component } from "./classes/component.js";
 export { componentList } from "./classes/componentList.js"
+export { Resolver } from "./classes/resolver.js";

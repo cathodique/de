@@ -75,21 +75,27 @@ function serializeNode(node: Node) {
 }
 
 class MutationDispatcher {
-  private static observer = new MutationObserver(MutationDispatcher.handle);
+  private static observers = new WeakMap<Node, MutationObserver>();
+  private static handle(mutations: MutationRecord[]) {
+    for (const m of mutations) {
+      SharedDOM.handleMutation(m);
+    }
+  }
 
   static observe(root: Node) {
-    this.observer.observe(root, {
+    const observer = new MutationObserver(this.handle);
+    observer.observe(root, {
       subtree: true,
       attributes: true,
       childList: true,
       characterData: true,
     });
+    this.observers.set(root, observer);
   }
 
-  private static handle(mutations: MutationRecord[]) {
-    for (const m of mutations) {
-      SharedDOM.handleMutation(m);
-    }
+  static disconnect(root: Node) {
+    this.observers.get(root)?.disconnect();
+    this.observers.delete(root);
   }
 }
 
@@ -98,34 +104,37 @@ export class SharedDOM {
     parentIpc.rpc("deleteNode", { id: heldValue });
   });
 
-  static initOrGet(root: Node) {
+  static async initOrGet(root: Node) {
     if (NodeRegistry.hasNode(root)) return NodeRegistry.getId(root);
-    this.init(root);
+    await this.init(root);
     return NodeRegistry.getId(root);
   }
 
-  static init(root: Node) {
-    this.registerSubtree(root);
+  static async init(root: Node) {
+    await this.registerSubtree(root);
     MutationDispatcher.observe(root);
   }
 
-  static registerSubtree(node: Node) {
-    const id = NodeRegistry.getId(node);
-    if (node instanceof HTMLTemplateElement) this.registerSubtree(node.content);
-    node.childNodes.forEach((n: Node) => this.registerSubtree(n));
+  static async registerSubtree(node: Node) {
+    if (NodeRegistry.hasNode(node)) {
+      // We presuppose it will be registered again by init
+      return MutationDispatcher.disconnect(node);
+    }
 
-    parentIpc.post({
-      type: "createNode",
-      data: {
-        id: id,
-        payload: serializeNode(node),
-        events: serializeEvents(node),
-      },
+    const id = NodeRegistry.getId(node);
+    if (node instanceof HTMLTemplateElement) await this.registerSubtree(node.content);
+
+    await Promise.all(Array.from(node.childNodes).map((n: Node) => this.registerSubtree(n)));
+
+    await parentIpc.rpc("createNode", {
+      id: id,
+      payload: serializeNode(node),
+      events: serializeEvents(node),
     });
     this.finReg.register(node, id);
   }
 
-  static handleMutation(m: MutationRecord) {
+  static async handleMutation(m: MutationRecord) {
     const targetId = NodeRegistry.getId(m.target);
 
     switch (m.type) {
@@ -134,15 +143,16 @@ export class SharedDOM {
           type: "changeAttribute",
           data: {
             target: targetId,
-            name: m.attributeName,
+            name: m.attributeName!,
             namespace: m.attributeNamespace,
+            value: (m.target as Element).getAttributeNS(m.attributeNamespace, m.attributeName!),
           },
         });
         break;
 
       case "childList":
         if (m.addedNodes.length) {
-          const ids = Array.from(m.addedNodes, NodeRegistry.getId);
+          const ids = await Promise.all(Array.from(m.addedNodes).map(SharedDOM.initOrGet.bind(SharedDOM)));
           parentIpc.post({
             type: "addNodes",
             data: {
@@ -154,7 +164,7 @@ export class SharedDOM {
         }
 
         if (m.removedNodes.length) {
-          const ids = Array.from(m.removedNodes, NodeRegistry.getId);
+          const ids = await Promise.all(Array.from(m.removedNodes).map(SharedDOM.initOrGet.bind(SharedDOM)));
           parentIpc.post({
             type: "removeNodes",
             data: {

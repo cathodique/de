@@ -111,6 +111,6 @@
     "src/renderer/.common/**/*.ts"
   ],
   "exclude": [
-    "modules"
+    "de/src/modules"
   ]
 }

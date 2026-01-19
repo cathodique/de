@@ -1,5 +1,4 @@
-import { OutputConfiguration } from "@cathodique/wl-serv-high/objects";
-import { OutputRegistry } from "@cathodique/wl-serv-high/registries";
+import { OutputConfiguration, OutputRegistry } from "@cathodique/wl-serv-high/registries";
 import { Output } from "../../classes/wayland/output/output";
 
 class OutputRegistryOverlay extends OutputRegistry {
@@ -15,17 +14,17 @@ class OutputRegistryOverlay extends OutputRegistry {
   }
 
   // TODO Memory management
-  seats = new Map<OutputConfiguration, Output>();
-  allSeats() {
-    return this.seats.values();
+  outputs = new Map<OutputConfiguration, Output>();
+  allOutputs() {
+    return this.outputs.values();
   }
-  seatOfCfg(config: OutputConfiguration) {
-    return this.seats.get(config);
+  outputOfCfg(config: OutputConfiguration) {
+    return this.outputs.get(config);
   }
 
   addAuthority(cfg: OutputConfiguration) {
     super.addAuthority(cfg);
-    this.seats.set(cfg, new Output(cfg, this));
+    this.outputs.set(cfg, new Output(cfg, this));
   }
 }
 

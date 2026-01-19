@@ -20,6 +20,6 @@ export { projectSubdomain, userSubdomain };
 export const host = hostList.join('.')
 
 export const canonicalHost = `${location.protocol}//${hostList.join(".")}:${location.port}`;
-export const parentOrigin = await fetch("/.common/hostOverride").then((v) => v.text(), () => canonicalHost);
+export const parentOrigin = new URLSearchParams(location.search).get("parent_origin") || canonicalHost;
 
 export const stringStartsWithDollar = (v: string): v is `$${string}` => v.startsWith("$");

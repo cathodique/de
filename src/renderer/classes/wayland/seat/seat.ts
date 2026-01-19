@@ -1,9 +1,8 @@
-import { SeatAuthority, SeatInstances, SeatRegistry } from "@cathodique/wl-serv-high/registries";
+import { SeatConfiguration, SeatInstances, SeatRegistry } from "@cathodique/wl-serv-high/registries";
 import { Modifiers } from "./modifiers.js";
 import { codeToScan } from "./codeToScancode.js";
 import { SurfaceDom } from "../../handlers/dom/surface.js";
 import { isInRegion } from "../../../wayland/index.js";
-import { SeatConfiguration } from "@cathodique/wl-serv-high/objects";
 
 export class Seat {
   static mouseWebToButtonMap: Record<string, number> = {
@@ -74,7 +73,27 @@ export class Seat {
     });
   }
 
-  move (evt: MouseEvent, surface: SurfaceDom, forceLeave?: boolean) {
+  setMouseFocus(surface: SurfaceDom) {
+    this.mouseFocus = {
+      surface,
+      instances: this.wlSeatAuth.get(surface.wl.connection)!,
+    };
+  }
+  unsetMouseFocus() {
+    this.mouseFocus?.instances.blur(this.mouseFocus.surface.wl);
+    this.mouseFocus?.instances.leave(this.mouseFocus.surface.wl);
+    this.mouseFocus = undefined;
+  }
+
+  setKeyboardFocus(surface: SurfaceDom) {
+    this.keyboardFocus = {
+      surface,
+      instances: this.wlSeatAuth.get(surface.wl.connection)!,
+    };
+  }
+  unsetKeyboardFocus() { this.keyboardFocus = undefined; }
+
+  move(evt: MouseEvent, surface: SurfaceDom, forceLeave?: boolean) {
     // (obj.xdgSurface?.parent as XdgWmBase)?.addCommand("ping", {
     //   serial: obj.connection.time.getTime(),
     // });
@@ -91,19 +110,17 @@ export class Seat {
       !forceLeave &&
       isInRegion(surface.wl.inputRegions.current, mouseY, mouseX, true)
     ) {
+      // We are in the region and not looking to leave
       if (this.mouseFocus?.surface !== surface) {
+        this.setMouseFocus(surface);
+        // We are currently focusing a surface that is not ours
         this.mouseFocus!.instances = this.wlSeatAuth.get(surface.wl.connection)!;
         const enterSerial = this.mouseFocus!.instances.focus(surface.wl, []);
         this.modifiers.update(this.mouseFocus!.instances.connection, enterSerial);
         this.mouseFocus!.instances.enter(surface.wl, mouseX, mouseY);
+        // ?????
       }
-      this.mouseFocus!.instances.moveTo(mouseX, mouseY);
-    } else {
-      if (this.mouseFocus?.surface === surface) {
-        this.mouseFocus!.instances.blur(surface.wl);
-        this.mouseFocus!.instances.leave(surface.wl);
-        this.mouseFocus = undefined;
-      }
+      this.mouseFocus?.instances.moveTo(mouseX, mouseY);
     }
   }
 }

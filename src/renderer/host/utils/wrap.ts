@@ -7,23 +7,23 @@ import { OtherNodeRegistry } from "../classes/sharedDomHost";
 
 export const zodWrappedValue = z.union([
   z.object({
-    value: z.any(),
-  }),
-  z.object({
     type: z.literal("component"),
     componentName: z.string(),
     componentId: z.string(),
-    moduleId: z.string().optional(), // undefined => This module comes from myself
+    moduleId: z.string(),
   }),
   z.object({
     type: z.literal("node"),
     nodeId: z.string(),
   }),
+  z.object({
+    value: z.any(),
+  }),
 ]);
 export type WrappedValue = z.output<typeof zodWrappedValue>;
 
 export async function wrapValue(value: any): Promise<z.output<typeof zodWrappedValue>> {
-  const isComponent = (v: any): v is (Component | ComponentInstanceProxy) => v[Component.isComponentSymbol];
+  const isComponent = (v: any): v is (Component | ComponentInstanceProxy) => v?.[Component.isComponentSymbol];
   if (isComponent(value)) {
     const isRemote = "componentName" in value;
 
@@ -55,13 +55,16 @@ export async function unwrapValue(value: any, fromModule: RemoteModule) {
   switch (wrapped.type) {
     case "component":
       const moduleId = wrapped.moduleId || fromModule.opaqueToken;
-      const module = BaseModule.moduleById(moduleId);
+      const module = BaseModule.moduleByToken(moduleId);
       if (!module?.instanceExists(wrapped.componentId)) {
         return undefined;
       }
       // if (module instanceof remote)
       // return makeComponentProxy(module, wrapped.componentName, wrapped.componentId);
+      return module.localHandle;
     case "node":
-      return OtherNodeRegistry.registryOf((await fromModule.peer).source)!.getNode(value.nodeId);
+      const { source } = fromModule.peer;
+      if (source instanceof MessagePort || source instanceof ServiceWorker) throw new Error("Source supposed to be a window");
+      return OtherNodeRegistry.registryOf(source)!.getNode(value.nodeId);
   }
 }

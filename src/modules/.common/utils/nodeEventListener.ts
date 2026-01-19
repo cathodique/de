@@ -176,7 +176,6 @@ function patchOnEvents() {
           return currentListener;
         },
         set(fn: ((...args: any[]) => any) | null) {
-          console.log(fn)
 
           const node = this as Node;
 

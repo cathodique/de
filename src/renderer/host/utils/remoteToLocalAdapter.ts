@@ -1,3 +1,4 @@
+import { EventEmitter } from "events";
 import { Component } from "../classes/component.js";
 import { ComponentListHandle } from "../classes/componentList.js";
 import { Latch, LatchState } from "../classes/latch.js";
@@ -6,15 +7,26 @@ import { OrderedPeer } from "../classes/orderedPeer.js";
 import { unwrapValue, wrapValue } from "./wrap.js";
 
 export class ComponentListProxy implements ComponentListHandle {
-  componentClasses = new Map<string, new () => ComponentInstanceProxy>();
+  #module: RemoteModule;
+  constructor(mod: RemoteModule) {
+    this.#module = mod;
+  }
 
   get(componentName: string) {
-    return this.componentClasses.get(componentName);
+    const availableComponents = this.#module.availableComponents;
+
+    if (!availableComponents.includes(componentName)) return undefined;
+
+    return {
+      create: (...args: any[]) => {
+        return makeComponentProxy(this.#module, componentName, { args });
+      }
+    };
   }
 }
 
-export class ComponentInstance {
-  ipc: OrderedPeer;
+export class ComponentInstance extends EventEmitter {
+  peer: OrderedPeer;
 
   module: RemoteModule;
 
@@ -22,13 +34,29 @@ export class ComponentInstance {
 
   componentName: string;
   constructor(module: RemoteModule, componentName: string, options: { componentId: string } | { args: any[] }) {
+    super();
     this.module = module;
 
-    this.ipc = this.module.peer;
+    this.peer = this.module.peer;
     this.componentName = componentName;
 
     if ("componentId" in options) this.#cidLatch.resolve!(options.componentId);
     if ("args" in options) this.#args = options.args;
+
+    this.on("newListener", async function (this: ComponentInstance, evtName: string) {
+      if (evtName === "newListener" || evtName === "removeListener") return;
+
+      if (this.listenerCount(evtName) === 0) {
+        this.peer.rpc("listenToEvent", { componentId: await this.componentId, eventName: evtName });
+      }
+    }.bind(this));
+    this.on("removeListener", async function (this: ComponentInstance, evtName: string) {
+      if (evtName === "newListener" || evtName === "removeListener") return;
+
+      if (this.listenerCount(evtName) === 0) {
+        this.peer.rpc("unlistenToEvent", { componentId: await this.componentId, eventName: evtName });
+      }
+    }.bind(this));
   }
 
   #cidLatch = new Latch<string>();
@@ -38,20 +66,19 @@ export class ComponentInstance {
 
   async init() {
     if (this.#cidLatch.getState() === LatchState.Pending) {
-      await this.module.waitForComponent(this.componentName);
-
-      await this.module.componentReady.get(this.componentName);
-      const componentId = await (await this.ipc).rpc("createInstance", {
+      const componentId = await this.peer.rpc("createInstance", {
         className: this.componentName,
         args: this.#args.map((v) => wrapValue(v)),
       });
       this.#cidLatch.resolve!(componentId);
       this.ready.resolve!();
+    } else {
+      this.ready.resolve?.();
     }
   }
 }
 export type ComponentInstanceProxy = ComponentInstance
-  & Partial<Record<string, any>>
+  & Record<`$${string}`, any>
   & { [Component.isComponentSymbol]: true };
 
 function generateCalledOrAwaited({ called, awaited }: { called: (...args: any[]) => any, awaited: () => any }) {

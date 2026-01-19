@@ -24,12 +24,12 @@ class NodeData {
 }
 
 export class OtherNodeRegistry {
-  static registryPerSource = new WeakMap<MessageEventSource, OtherNodeRegistry>();
+  static registryPerSource = new WeakMap<WindowProxy, OtherNodeRegistry>();
 
-  static registryOf(source: MessageEventSource) {
+  static registryOf(source: WindowProxy) {
     return this.registryPerSource.get(source);
   }
-  static setRegistry(source: MessageEventSource, nr: OtherNodeRegistry) {
+  static setRegistry(source: WindowProxy, nr: OtherNodeRegistry) {
     if (OtherNodeRegistry.registryPerSource.has(source)) throw new Error("Only one NodeRegistry per window may exist");
     return this.registryPerSource.set(source, nr);
   }
@@ -41,10 +41,10 @@ export class OtherNodeRegistry {
     return this.nodeData.get(node);
   }
 
-  source: MessageEventSource;
+  win: WindowProxy;
 
-  constructor(source: MessageEventSource) {
-    this.source = source;
+  constructor(source: WindowProxy) {
+    this.win = source;
   }
 
   hasNode(node: Node) {

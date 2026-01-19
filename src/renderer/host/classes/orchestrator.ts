@@ -35,13 +35,19 @@ export class Orchestrator {
     this.overridesAll.set(str, modules);
   }
 
-  load(schemaName: string) {
+  async load(schemaName: string) {
     const overriddenBy = this.overrides.get(schemaName);
 
     const moduleName = overriddenBy ?? this.defaults.get(schemaName);
     if (!moduleName) return undefined;
 
-    return BaseModule.getModule(moduleName);
+    if (BaseModule.summonnedModules.has(moduleName)) {
+      return BaseModule.summonnedModules.get(moduleName);
+    }
+
+    const mod = await BaseModule.getModule(moduleName);
+    BaseModule.addModule(moduleName, mod);
+    return mod;
   }
 
   loadAll(schemaName: string) {
@@ -50,8 +56,10 @@ export class Orchestrator {
     const moduleNames = overriddenBy ?? this.data.defaultsAll[schemaName];
     if (!moduleNames) return undefined;
 
-    return Promise.all(moduleNames.map(function (this: Orchestrator, moduleName: string) {
-      return BaseModule.getModule(moduleName)!;
+    return Promise.all(moduleNames.map(async (moduleName: string) => {
+      const mod = await BaseModule.getModule(moduleName)!;
+      BaseModule.addModule(moduleName, mod);
+      return mod;
     }));
   }
 }

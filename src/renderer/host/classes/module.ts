@@ -1,6 +1,6 @@
 import { KeyedLatch, Latch } from "./latch.js";
 import { OrderedPeer } from "./orderedPeer.js";
-import { CathodiqueConsumerHandler } from "../ipcHandlers/cathodiqueConsumer.js";
+import { CathodiqueAvailableComponentsHandler, CathodiqueConsumerHandler } from "../ipcHandlers/cathodiqueConsumer.js";
 import { CathodiqueHostHandler } from "../ipcHandlers/cathodiqueHost.js";
 import { DOMHostHandler } from "../ipcHandlers/domHost.js";
 import { OtherNodeRegistry } from "./sharedDomHost.js";
@@ -32,9 +32,15 @@ export abstract class BaseModule {
   static summonnedModules = new Map<string, BaseModule>();
   static tokenToModule = new Map<string, BaseModule>();
 
-  static summonnedModulesById = new Map<string, BaseModule>();
-  static moduleById(id: string) {
-    return this.summonnedModulesById.get(id);
+  static addModule(moduleName: string, module: BaseModule) {
+    if (BaseModule.summonnedModules.has(moduleName)) throw new Error("Module already initialized");
+    BaseModule.summonnedModulesByToken.set(module.opaqueToken, module);
+    BaseModule.summonnedModules.set(moduleName, module);
+  }
+
+  static summonnedModulesByToken = new Map<string, BaseModule>();
+  static moduleByToken(id: string) {
+    return this.summonnedModulesByToken.get(id);
   }
 
   static originOfModule(module?: BaseModule) {
@@ -53,19 +59,17 @@ export abstract class BaseModule {
   }
 
   opaqueToken: string;
+  abstract win: WindowProxy;
 
   moduleName: string;
   constructor(moduleName: string) {
-    if (BaseModule.summonnedModules.has(moduleName)) throw new Error("Module already initialized");
-    BaseModule.summonnedModules.set(moduleName, this);
-
     this.opaqueToken = orchestrator.data.moduleData[moduleName]!.opaqueToken;
 
     this.moduleName = moduleName;
   }
 
   abstract localHandle: ComponentListHandle;
-  abstract getRemoteHandle(to: RemoteModule): MessagePort | Promise<MessagePort>;
+  abstract getRemoteHandle(to: RemoteModule): MessagePort | undefined | Promise<MessagePort | undefined>;
   abstract instanceExists(id: string): boolean | Promise<boolean>;
   abstract getComponent(id: string): ComponentHandle | undefined | Promise<ComponentHandle | undefined>;
 }
@@ -76,9 +80,10 @@ export class LocalModule extends BaseModule {
   static setupModule(moduleName: string) {
     this.availableModules.add(moduleName);
     const mod = new LocalModule(moduleName);
-    BaseModule.summonnedModules.set(moduleName, mod);
     return mod;
   }
+
+  win = window;
 
   components = new Map<string, Component>();
 
@@ -89,16 +94,16 @@ export class LocalModule extends BaseModule {
     this.localHandle = new ComponentList(this);
   }
 
-  remoteHandles = new Map<RemoteModule, MessagePort>();
+  remoteHandles = new Set<RemoteModule>();
   getRemoteHandle(from: RemoteModule) {
-    if (this.remoteHandles.has(from)) return this.remoteHandles.get(from)!;
+    if (this.remoteHandles.has(from)) return undefined;
 
     const messageChannel = new SemanticMessageChannel();
 
-    const ipc = new OrderedPeer(messageChannel.providerPort, BaseModule.originOfModule(from));
-    ipc.addHandler(new CathodiqueProviderHandler(from, this));
+    const peer = new OrderedPeer(messageChannel.providerPort, "*");
+    peer.addHandler(new CathodiqueProviderHandler(from, this, peer));
 
-    this.remoteHandles.set(from, messageChannel.consumerPort);
+    this.remoteHandles.add(from);
     return messageChannel.consumerPort;
   }
 
@@ -128,7 +133,7 @@ export class RemoteModule extends BaseModule {
     const moduleSubdomain = this.moduleSubdomainOf(moduleName);
 
     const iframe = document.createElement("iframe");
-    iframe.src = `https://${moduleSubdomain}.raytu.be/module.html`;
+    iframe.src = `https://${moduleSubdomain}.raytu.be/module.html?parent_origin=${encodeURIComponent(window.origin)}`;
     iframe.hidden = true;
 
     document.body.append(iframe);
@@ -136,7 +141,14 @@ export class RemoteModule extends BaseModule {
     const win = iframe.contentWindow!;
     OtherNodeRegistry.setRegistry(win, new OtherNodeRegistry(win));
 
-    return new RemoteModule(moduleName, iframe);
+    const peer = new OrderedPeer(
+      iframe.contentWindow!,
+      `https://${moduleSubdomain}.raytu.be`,
+    );
+    const availableComponents = new Latch<string[]>();
+    peer.addHandler(new CathodiqueAvailableComponentsHandler(availableComponents));
+
+    return new RemoteModule(moduleName, await availableComponents.promise, peer, iframe);
   }
 
   peer: OrderedPeer;
@@ -144,19 +156,19 @@ export class RemoteModule extends BaseModule {
   get win() { return this.iframe.contentWindow! };
 
   componentList: ComponentListHandle;
-  private constructor(moduleName: string, iframe: HTMLIFrameElement) {
+  private constructor(moduleName: string, availableComponents: string[], peer: OrderedPeer, iframe: HTMLIFrameElement) {
     super(moduleName);
 
+    this.peer = peer;
     this.iframe = iframe;
 
-    this.componentList = new ComponentListProxy();
-    this.peer = new OrderedPeer(
-      iframe.contentWindow!,
-      `https://${this.#moduleSubdomain}.raytu.be`,
-    );
-    this.peer.addHandler(new CathodiqueConsumerHandler(this));
+    this.availableComponents = availableComponents;
+
+    this.componentList = new ComponentListProxy(this);
+
     this.peer.addHandler(new CathodiqueHostHandler(this));
     this.peer.addHandler(new DOMHostHandler(this.win, this));
+    this.peer.addHandler(new CathodiqueConsumerHandler(this));
   }
 
   get #moduleSubdomain() {
@@ -166,43 +178,30 @@ export class RemoteModule extends BaseModule {
     return `https://${this.#moduleSubdomain}.raytu.be`;
   }
 
-  #iframeLoaded = false
-  componentReady = new KeyedLatch<string, void>();
-
-  async waitForComponent(componentName: string) {
-    await this.componentReady.get(componentName);
-  }
+  availableComponents: string[];
 
   localHandle = {
-    get: function (this: RemoteModule, componentName: string) {
-      return function (this: RemoteModule, ...args: any[]) {
+    get: (componentName: string) => ({
+      create: (...args: any[]) => {
         return makeComponentProxy(this, componentName, { args });
-      }.bind(this) as unknown as new () => ComponentInstanceProxy; // Proxy magic: TS is wrong here
-    }.bind(this),
+      },
+    }),
   }
 
-  remoteHandles = new Map<RemoteModule, MessagePort>();
+  remoteHandles = new Set<RemoteModule>();
   async getRemoteHandle(to: RemoteModule) {
-    if (this.remoteHandles.has(to)) return this.remoteHandles.get(to)!;
+    if (this.remoteHandles.has(to)) return undefined;
 
     const messageChannel = new SemanticMessageChannel();
 
     await this.peer.rpc("connectAsProvider",
       new WithTransfer(
-        { data: { port: messageChannel.providerPort, moduleToken: undefined } },
+        { port: messageChannel.providerPort, id: to.opaqueToken },
         [messageChannel.providerPort],
       ));
 
-    this.remoteHandles.set(to, messageChannel.consumerPort);
+    this.remoteHandles.add(to);
     return messageChannel.consumerPort;
-  }
-
-  async submitRemoteHandle(port: MessagePort, from: RemoteModule) {
-    await this.peer.rpc("connectAsProvider",
-      new WithTransfer(
-        { data: { port: port, moduleToken: from.opaqueToken } },
-        [port],
-      ));
   }
 
   async instanceExists(id: string) {

@@ -1,11 +1,13 @@
+import { componentTypes } from "../utils/types.js";
 import { nanoid } from "../utils/utils.js";
 import { wrapValue } from "../utils/wrap.js";
 import { BaseModule, LocalModule } from "./module.js";
 import { orchestrator } from "./orchestrator.js";
 import { OrderedPeer } from "./orderedPeer.js";
 
-export interface ComponentContext {
-  module: BaseModule;
+export interface PartialComponentContext { }
+export interface ComponentContext extends PartialComponentContext {
+  module: LocalModule;
 }
 export type ComponentHandle = {
   module: BaseModule;
@@ -15,7 +17,7 @@ export type ComponentHandle = {
 } & { [k in `$${string}`]: any };
 
 const isComponentSymbol = Symbol();
-export class Component extends EventTarget {
+export abstract class Component implements ComponentHandle {
   static isComponentSymbol: typeof isComponentSymbol = isComponentSymbol;
 
   [x: `$${string}`]: any;
@@ -23,14 +25,20 @@ export class Component extends EventTarget {
   componentId: string;
   module: LocalModule;
 
+  static type: typeof componentTypes[number] = "NORMAL";
+
   [isComponentSymbol] = true;
   constructor(module: LocalModule) {
-    super();
-    this.componentId = nanoid();
     this.module = module;
+    this.componentId = nanoid();
+
+    this.module.localHandle.componentInstances.set(
+      this.componentId,
+      this,
+    );
   }
 
-  async init() {}
+  init(): any {}
 
   async getDependency(dependency: string) {
     const newMod = await orchestrator.load(dependency);
@@ -54,8 +62,8 @@ export class Component extends EventTarget {
 
     if (innerSet.size === 0) this.#listenersFromRemote.delete(eventName);
   }
-  emit(eventName: string, args: any[]) {
-    const wrapped = args.map((v) => wrapValue(v))
+  async emit(eventName: string, ...args: any[]) {
+    const wrapped = await Promise.all(args.map((v) => wrapValue(v)))
 
     const innerSet = this.#listenersFromRemote.get(eventName);
     if (!innerSet) return;

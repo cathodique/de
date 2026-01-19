@@ -2,14 +2,14 @@ import "../host/index.js";
 
 import { HLCompositor } from "@cathodique/wl-serv-high";
 import { InstructionType, RegRectangle } from "@cathodique/wl-serv-high/objects";
-import { OutputRegistry } from "@cathodique/wl-serv-high/registries";
 import { KeyboardRegistry } from "@cathodique/wl-serv-high/objects";
 import { ipcRenderer } from "electron/renderer";
 import { BaseObject } from "@cathodique/wl-serv-high/objects";
-import { objectHandlers } from "../classes/handlers/handlers.js";
-import { Output } from "../classes/wayland/output/output.js";
 import { seatRegistry } from "./overlays/seatRegistryOverlay.js";
 import { outputRegistry } from "./overlays/outputRegistryOverlay.js";
+import { strutRegistry } from "./overlays/strutRegistryOverlay.js";
+import { objectHandlers } from "../classes/handlers/handlers.js";
+import { orchestrator } from "../host/index.js";
 
 // HERE
 // TODO:::
@@ -31,8 +31,8 @@ const mySeatConfig = {
   name: "seat0",
   capabilities: 3,
 };
-
 seatRegistry.addAuthority(mySeatConfig);
+export const seat = seatRegistry.seatOfCfg(mySeatConfig)!;
 
 const myOutputConfig = {
   x: 0,
@@ -44,12 +44,11 @@ const myOutputConfig = {
 };
 outputRegistry.addAuthority(myOutputConfig);
 
-// new Seat(mySeatConfig, seatReg);
-
 const compo = new HLCompositor({
   wl_registry: {
     outputs: outputRegistry,
     seats: seatRegistry,
+    struts: strutRegistry,
   },
   wl_keyboard: new KeyboardRegistry({ keymap: "us" }),
 });
@@ -67,13 +66,19 @@ compo.on("connection", (c) => {
     if (!matching) return;
 
     // @ts-ignore
-    new matching(obj);
+    new matching(obj).init();
   });
 });
 compo.start();
 
 compo.on("ready", () => {
   document.body.append(`Ready at ${compo.params.socketPath}`);
+
   ipcRenderer.send("addToDeleteQueue", compo.params.socketPath);
   ipcRenderer.send(`Ready at ${compo.params.socketPath}.lock`);
+});
+
+orchestrator.load("WindowManager").then(async (mod) => {
+  const stuff = await mod!.localHandle.get("WindowManager")!.create();
+  document.body.append(await stuff.$output);
 });

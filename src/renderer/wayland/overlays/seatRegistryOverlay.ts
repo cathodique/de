@@ -1,5 +1,4 @@
-import { SeatConfiguration } from "@cathodique/wl-serv-high/objects";
-import { SeatRegistry } from "@cathodique/wl-serv-high/registries";
+import { SeatConfiguration, SeatRegistry } from "@cathodique/wl-serv-high/registries";
 import { Seat } from "../../classes/wayland/seat/seat";
 
 class SeatRegistryOverlay extends SeatRegistry {

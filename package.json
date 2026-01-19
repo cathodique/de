@@ -9,7 +9,9 @@
     "build-asset-homomorphic": "rm -frfr dist && mkdir dist && cp -frfr src/* dist/ && find dist/ -name \"*.ts\" -type f -delete",
     "build-browser-host": "esbuild dist/renderer/wayland/index.js --bundle --platform=node --target=node22.4 --external:electron --external:@cathodique/wl-serv-high --outfile=dist/renderer/index.js",
     "build-browser-common": "esbuild dist/modules/.common/index.js --bundle --outfile=dist/modules/.common/bundle.js --format=esm",
-    "build": "npm run build-asset-homomorphic && npx tsgo && npx tsc -p tsconfig.modules.json && npm run build-browser-host && npm run build-browser-common"
+    "build-source": "npm run build-asset-homomorphic && npx tsgo && npx tsc -p tsconfig.modules.json && npm run build-browser-host && npm run build-browser-common",
+    "build-bin": "npx electron-rebuild",
+    "build": "concurrently \"npm run build-source\" \"npm run build-bin\""
   },
   "repository": {
     "type": "git",
@@ -26,6 +28,7 @@
     "@types/electron": "^1.4.38",
     "@types/events": "^3.0.3",
     "@types/node": "^22.10.2",
+    "concurrently": "^9.2.1",
     "prettier": "3.7.4",
     "typescript": "^5.7.2"
   },
