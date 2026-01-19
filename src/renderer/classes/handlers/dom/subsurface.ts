@@ -1,21 +1,21 @@
 import { WlSubsurface } from "@cathodique/wl-serv-high/objects";
 import { WlSurface } from "@cathodique/wl-serv-high/objects";
 import { wlToObj } from "../handlers.js";
+import { BaseDom } from "./base.js";
 
-export class Subsurface {
-  wl: WlSubsurface;
+export class SubsurfaceDom extends BaseDom<WlSubsurface, HTMLDivElement> {
   get surfaceDom() { return wlToObj.get(this.wl.meta.surface)! };
   get parentSurfaceDom() { return wlToObj.get(this.wl.meta.parent)! };
 
   constructor(wl: WlSubsurface) {
-    this.wl = wl;
+    super(wl, document.createElement("div"));
+    this.dom.append(this.surfaceDom.dom);
+    this.dom.style.position = "absolute";
 
     wlToObj.set(wl, this);
-    console.log("aaasdfsfd");
   }
 
   init () {
-    console.log("aaasdfsfd");
     // Subsurface shenanigans
     // TODO: Apply on commit
     this.wl.on("wlPlaceAbove", this.placeAbove.bind(this));
@@ -24,10 +24,8 @@ export class Subsurface {
     this.wl.on("wlPlaceBelow", this.placeBelow.bind(this));
 
     this.wl.on('wlSetPosition', ({ y, x }: { y: number, x: number }) => {
-      const surface = wlToObj.get(this.wl.meta.surface)!;
-
-      surface.dom.style.top = `${y}px`;
-      surface.dom.style.left = `${x}px`;
+      this.dom.style.top = `${y}px`;
+      this.dom.style.left = `${x}px`;
     });
   }
 
@@ -47,13 +45,13 @@ export class Subsurface {
         const commonParentWl = other.subsurface!.meta.parent;
         const commonParent = wlToObj.get(commonParentWl)!;
 
-        commonParent.dom.insertBefore(this.surfaceDom.dom, sibling.dom);
+        commonParent.dom.insertBefore(this.dom, sibling.dom);
         break;
       }
       case "parent": {
         const parent = wlToObj.get(other)!;
 
-        parent.dom.insertBefore(this.surfaceDom.dom, parent.canvas);
+        parent.dom.insertBefore(this.dom, parent.canvas);
         break;
       }
       default:
@@ -67,13 +65,13 @@ export class Subsurface {
         const commonParentWl = other.subsurface!.meta.parent;
         const commonParent = wlToObj.get(commonParentWl)!;
 
-        commonParent.dom.insertBefore(this.surfaceDom.dom, sibling.dom.nextSibling);
+        commonParent.dom.insertBefore(this.dom, sibling.dom.nextSibling);
         break;
       }
       case "parent": {
         const parent = wlToObj.get(other)!;
 
-        parent.dom.insertBefore(this.surfaceDom.dom, parent.canvas.nextSibling);
+        parent.dom.insertBefore(this.dom, parent.canvas.nextSibling);
         break;
       }
       default:

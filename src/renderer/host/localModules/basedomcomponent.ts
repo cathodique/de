@@ -9,6 +9,11 @@ export class BaseDomComponent<From extends BaseObject, To extends Element> exten
     super(mod);
     this.wl = wl;
     this.$output = dom;
+
+    this.wl.once("beforeWlDestroy", () => {
+      this.destroy();
+      this.emit("destroy");
+    });
   }
 
   unmount: (() => any)[] = [];

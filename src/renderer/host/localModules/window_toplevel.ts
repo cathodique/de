@@ -39,10 +39,11 @@ export class ToplevelDom extends BaseDomComponent<XdgToplevel, HTMLDivElement> {
     wlToToplevelDom.set(wl, this);
   }
 
+  get $geometry() { return this.wl.parent.geometry.current }
   async init () {
-    this.emit("setGeometry", this.wl.parent.geometry.current);
+    this.emit("setGeometry", this.$geometry);
     this.wl.parent.geometry.on("current", () => {
-      this.emit("setGeometry", this.wl.parent.geometry.current);
+      this.emit("setGeometry", this.$geometry);
     });
 
     this.emit("setTitle", this.wl.title);

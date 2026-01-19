@@ -8,15 +8,12 @@ import { outputRegistry } from "../../../wayland/overlays/outputRegistryOverlay.
 import { isIntersecting } from "../../../utils/domIntersect.js";
 
 export class SurfaceDom extends BaseDom<WlSurface, HTMLDivElement> {
-  static domToSurface = new Map<HTMLDivElement, SurfaceDom>();
-
   ctx: CanvasRenderingContext2D;
   canvas = document.createElement("canvas");
   constructor(wl: WlSurface) {
     super(wl, document.createElement("div"));
     this.dom.append(this.canvas);
 
-    SurfaceDom.domToSurface.set(this.dom, this);
     wlToObj.set(wl, this);
 
     this.canvas.style.position = "absolute";
@@ -80,11 +77,6 @@ export class SurfaceDom extends BaseDom<WlSurface, HTMLDivElement> {
 
     commitHandler();
     this.wl.on("update", () => commitHandler());
-
-    this.wl.once("beforeWlDestroy", () => {
-      // Unsure vvv
-      this.dom.remove();
-    });
   }
 
   initSeatMouse(seat: Seat) {
