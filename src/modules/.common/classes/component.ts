@@ -46,7 +46,7 @@ export abstract class Component implements ComponentHandle {
 
     if (innerSet.size === 0) this.#listenersFromRemote.delete(eventName);
   }
-  emit(eventName: string, args: any[]) {
+  emit(eventName: string, ...args: any[]) {
     const wrapped = args.map((v) => wrapValue(v))
 
     const innerSet = this.#listenersFromRemote.get(eventName);
