@@ -2,7 +2,6 @@ import { EventFromIpc, HandlerContext, NodeFromIpc, zodNodeFromIpc } from "../ut
 import { BaseModule, RemoteModule } from "../classes/module.js";
 import { OtherNodeRegistry } from "../classes/sharedDomHost.js";
 import z from "zod";
-import { NodeRegistry } from "../../../modules/.common/classes/sharedDomRemote.js";
 
 function allProperties(obj: any) {
   const result = [];
@@ -73,7 +72,7 @@ export class DOMHostHandler {
       this.#nodeReg.registerEvent(node, event, async (v: Event) => {
         const ipc = this.#module.peer;
 
-        await ipc.rpc("domEmitEvent", { id: data.id, event: this.#serializeEvent(v) });
+        await ipc.rpc("domEmitEvent", { target: data.id, event: this.#serializeEvent(v) });
       });
     }
   }
@@ -192,5 +191,39 @@ export class DOMHostHandler {
     if (!targetNode) throw new Error("Target node does not exist");
 
     (targetNode as Element).nodeValue = data.value;
+  }
+
+  registerEvent(args: Record<string, any>) {
+    return this.#registerEvent(z.object({
+      data: z.object({
+        target: z.string(),
+        addedEvent: z.string(),
+      }),
+    }).parse(args));
+  }
+  #registerEvent({ data }: { data: { target: string, addedEvent: string } }) {
+    const node = this.#nodeReg.getNode(data.target);
+    if (!node) throw new Error("Inexistant node");
+
+    this.#nodeReg.registerEvent(node, data.addedEvent, async (v: Event) => {
+      const ipc = this.#module.peer;
+
+      await ipc.rpc("domEmitEvent", { target: data.target, event: this.#serializeEvent(v) });
+    });
+  }
+
+  unregisterEvent(args: Record<string, any>) {
+    return this.#unregisterEvent(z.object({
+      data: z.object({
+        target: z.string(),
+        addedEvent: z.string(),
+      }),
+    }).parse(args));
+  }
+  #unregisterEvent({ data }: { data: { target: string, addedEvent: string } }) {
+    const node = this.#nodeReg.getNode(data.target);
+    if (!node) throw new Error("Inexistant node");
+
+    this.#nodeReg.unregisterEvent(node, data.addedEvent);
   }
 };

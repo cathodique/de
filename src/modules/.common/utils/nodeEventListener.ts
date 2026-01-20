@@ -11,7 +11,7 @@ export const handlersMap = new WeakMap<
 
 export const nodeEventEvents = new EventTarget();
 
-class EventAddedEvent extends Event {
+export class EventAddedEvent extends Event {
   addedEvent: string;
   target: Node;
 
@@ -21,7 +21,7 @@ class EventAddedEvent extends Event {
     this.target = target;
   }
 }
-class EventRemovedEvent extends Event {
+export class EventRemovedEvent extends Event {
   removedEvent: string;
   target: Node;
 
