@@ -34,7 +34,7 @@ function serializeNode(node: Node) {
     case Node.ELEMENT_NODE: {
       const el = node as Element;
 
-      console.log(el.cloneNode(true), el);
+      // console.log(el.cloneNode(true), el);
 
       return {
         kind: "element",
@@ -141,7 +141,7 @@ export class SharedDOM {
 
     switch (m.type) {
       case "attributes":
-        console.log(m);
+        // console.log(m);
         parentIpc.post({
           type: "changeAttribute",
           data: {

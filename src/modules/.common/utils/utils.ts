@@ -1,17 +1,17 @@
 let alphabet =
   "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 
-export class ShouldHaveBeenZodError extends Error {
-  constructor(message?: string) {
-    super(message || "This error should have been caught by zod");
-  }
-}
-
 export function nanoid(e = 21) {
   let t = "",
     r = crypto.getRandomValues(new Uint8Array(e));
   for (let n = 0; n < e; n++) t += alphabet[63 & r[n]];
   return t;
+}
+
+export class ShouldHaveBeenZodError extends Error {
+  constructor(message?: string) {
+    super(message || "This error should have been caught by zod");
+  }
 }
 
 const [projectSubdomain, userSubdomain, ...hostList] =

@@ -165,6 +165,7 @@ export class OtherNodeRegistry {
 
   registerEvent (node: Node, event: string, evtHandler: (v: Event) => any) {
     this.nodeDataOf(node)!.registerEventListener(event, evtHandler);
+    console.log(event, evtHandler);
     node.addEventListener(event, evtHandler);
   }
   unregisterEvent (node: Node, event: string) {

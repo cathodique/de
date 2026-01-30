@@ -7,11 +7,11 @@
 	<script src="/.common/setup.js" type="module"></script>
 </head>
 <body>
-    <div id="window_manager">
+    <div id="window_manager" style="position:absolute; inset:0;">
         <p>Hello World</p>
     </div>
     <script type="module">
-        import { Component, componentList, Resolver } from "/.common/bundle.js";
+        import { Component, Resolver, componentList, setupElement } from "/.common/bundle.js";
 
         class WindowManager extends Component {
             $output = document.querySelector("#window_manager").cloneNode(true);
@@ -30,6 +30,7 @@
             constructor(windowFrameModule, windowRegistry) {
                 super();
 
+                setupElement(this.$output);
                 // windowRegistry.$hello();
 
                 this.#windowFrameModule = windowFrameModule;
@@ -43,7 +44,34 @@
                 const windowFrame = await WindowFrame.create(window);
                 this.windowFrames.set(window, windowFrame);
 
-                this.$output.append(await windowFrame.$output);
+                const windowFrameElement = await windowFrame.$output;
+                windowFrameElement.style.position = "absolute";
+                windowFrameElement.style.top = "0";
+                windowFrameElement.style.left = "0";
+                this.$output.append(windowFrameElement);
+                this.windowInitDragStart(windowFrame, windowFrameElement);
+            }
+
+            windowInitDragStart(windowFrame, windowFrameElement) {
+                windowFrame.on("dragstart", () => {
+                    // let lastEvent = undefined;
+                    // const onMove = (event) => {
+                    //     if (lastEvent) {
+                    //         // console.log(event);
+                    //         let leftValue = parseInt(window.getComputedStyle(windowFrameElement).left);
+                    //         let topValue = parseInt(window.getComputedStyle(windowFrameElement).top);
+                    //         windowFrameElement.style.left = `${leftValue - lastEvent.clientX + event.clientX}px`;
+                    //         windowFrameElement.style.top = `${topValue - lastEvent.clientY + event.clientY}px`;
+                    //     }
+                    //     lastEvent = event;
+                    // };
+
+                    // this.$output.addEventListener("mousemove", onMove);
+                    // windowFrame.once("dragend", () => {
+                    //     console.log("DRAG ENDED");
+                    //     this.$output.removeEventListener("mousemove", onMove);
+                    // });
+                });
             }
         }
         componentList.register("WindowManager", WindowManager);

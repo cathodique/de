@@ -131,6 +131,7 @@
             gap: .5em;
             background: repeating-linear-gradient(#E7E7E7, white, #E7E7E7);
             background-size: 100% 6pt;
+            overflow: hidden;
         }
 
         .dot {
@@ -185,18 +186,29 @@
             }
 
             async updateGeometry() {
-              const geometry = await this.window.$geometry;
-              console.log(geometry);
-              this.$output.querySelector(".windowbg").style.width = `${geometry.width}px`;
-              this.$output.querySelector(".windowbg").style.height = `${geometry.height}px`;
-              this.$output.querySelector(".windowbg").style.paddingLeft = `-${geometry.x}px`;
-              this.$output.querySelector(".windowbg").style.paddingTop = `-${geometry.y}px`;
+                const geometry = await this.window.$geometry;
+                // console.log(geometry);
+                this.$output.querySelector(".windowbg").style.width = `${geometry.width}px`;
+                this.$output.querySelector(".windowbg").style.height = `${geometry.height}px`;
+                this.$output.querySelector(".windowbg").style.paddingLeft = `-${geometry.x}px`;
+                this.$output.querySelector(".windowbg").style.paddingTop = `-${geometry.y}px`;
             }
             async init() {
                 this.$output.querySelector(".windowbg").append(await this.window.$output);
 
                 this.updateGeometry();
                 this.window.on("setGeometry", this.updateGeometry.bind(this));
+
+                this.initDragListener();
+            }
+            initDragListener() {
+                const titlebar = this.$output.querySelector(".titlebar");
+                titlebar.addEventListener("mousedown", () => {
+                    this.emit("dragstart");
+                });
+                titlebar.addEventListener("mouseup", () => {
+                    this.emit("dragend");
+                });
             }
         }
 

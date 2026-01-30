@@ -115,12 +115,12 @@ export class OrderedPeer {
     if (!this.originMatch(evt)) return;
 
     const { data: { messages, currentOrder } } = evt;
-    this.remainingMessages.set(currentOrder, messages);
+    // this.remainingMessages.set(currentOrder, messages);
 
-    while (this.remainingMessages.has(this.currentOrderReception)) {
-      const messages = this.remainingMessages.get(this.currentOrderReception)!;
-      this.remainingMessages.delete(this.currentOrderReception);
-      this.currentOrderReception += 1n;
+    // while (this.remainingMessages.has(this.currentOrderReception)) {
+      // const messages = this.remainingMessages.get(this.currentOrderReception)!;
+      // this.remainingMessages.delete(this.currentOrderReception);
+      // this.currentOrderReception += 1n;
 
       // Used to be await Promise.all.
       // Trying to prevent deadlock here...
@@ -152,6 +152,6 @@ export class OrderedPeer {
           this.post({ type: "reply", error: e, promiseId });
         }
       });
-    }
+    // }
   }
 }

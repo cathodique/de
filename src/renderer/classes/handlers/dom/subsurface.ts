@@ -38,7 +38,7 @@ export class SubsurfaceDom extends BaseDom<WlSubsurface, HTMLDivElement> {
   }
 
   placeAbove({ sibling: other }: { sibling: WlSurface }) {
-    console.log(other, this.wl.getRelationWith(other));
+    // console.log(other, this.wl.getRelationWith(other));
     switch (this.wl.getRelationWith(other)) {
       case "sibling": {
         const sibling = wlToObj.get(other)!;

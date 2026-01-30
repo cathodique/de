@@ -52,6 +52,8 @@ export class DOMRemoteHandler {
       newValues[key] = value.value;
     }
 
+    newValues.bubbles = false;
+
     return new EventClassObj(evtData.type, newValues);
   }
 
@@ -67,6 +69,9 @@ export class DOMRemoteHandler {
     const element = NodeRegistry.getNode(data.target);
 
     if (!element) return console.error(`Tried to emit event ${data.event} to inexistent element ${data.target}`);
+
+    console.log(data);
+    console.log(Date.now());
 
     element.dispatchEvent(this.#deserializeEvent(data.event));
   }
