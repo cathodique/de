@@ -1,24 +1,23 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 
-// app.allowRendererProcessReuse = false;
-
-// app.commandLine.appendSwitch("disable-hid-blocklist");
+import { registerProtocols } from "./protocols.js";
 
 const createWindow = () => {
   const win = new BrowserWindow({
-    width: 800,
-    height: 600,
     // fullscreen: true,
+    // resizable: false,
     webPreferences: {
       nodeIntegration: true,
+      nodeIntegrationInSubFrames: false,
       contextIsolation: false,
     },
   });
 
-  // win.webContents.openDevTools();
-  win.loadFile(join(__dirname, "../dist/index.html"));
+  registerProtocols();
+
+  win.webContents.openDevTools({ mode: "detach" });
+  win.loadURL("app://top/index.html");
 };
 
 const deleteQueue: string[] = [];

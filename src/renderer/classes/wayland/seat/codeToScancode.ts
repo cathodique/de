@@ -1,3 +1,5 @@
+// TODO: Find a much better way....
+
 export const codeToScan: Record<string, number> = {
   "Escape": 0x0009,
   "Digit1": 0x000A,
@@ -161,4 +163,4 @@ export const codeToScan: Record<string, number> = {
   "F23": 0x00C9,
   "F24": 0x00CA,
   "BrowserSearch": 0x00E1,
-}
+};

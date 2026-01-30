@@ -1,0 +1,74 @@
+import { net, OnBeforeRequestListenerDetails, protocol, session } from "electron";
+import { join } from "node:path";
+
+import { pathToFileURL } from "node:url";
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: "app",
+  privileges: {
+    standard: true,
+    secure: true,
+    bypassCSP: false,
+    allowServiceWorkers: false,
+    corsEnabled: true,
+    stream: true,
+    codeCache: true,
+  },
+}]);
+
+export const registerProtocols = () => {
+  protocol.handle('app', (request) => {
+    const reqUrl = new URL(request.url);
+
+    switch (reqUrl.host) {
+      case 'top':
+        if (reqUrl.pathname.split('/').some((v) => v === '.' || v === '..')) { // Path accesses
+          return new Response("Forbidden", { status: 403 });
+        }
+        return net.fetch(pathToFileURL(join(__dirname, '../renderer', reqUrl.pathname)).toString());
+      default:
+        return new Response("Not found", { status: 404 });
+    }
+  });
+
+  protocol.handle('https', (request) => {
+    const reqUrl = new URL(request.url);
+
+    if (reqUrl.pathname.split('/').some((v) => v === '.' || v === '..')) { // Path accesses
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    const [tld, sld, ...rest] = reqUrl.host.split('.').toReversed();
+    const domain = `${sld}.${tld}`;
+
+    switch (domain) {
+      case "raytu.be": {
+        if (reqUrl.pathname.startsWith('/.common/')) {
+          return net.fetch(pathToFileURL(join(__dirname, '../modules', reqUrl.pathname)).toString());
+        }
+
+        return net.fetch(pathToFileURL(join(__dirname, '../modules', rest.join('.'), reqUrl.pathname)).toString());
+      }
+    }
+
+    return new Response("Not found", { status: 404 });
+  });
+
+  session.defaultSession.webRequest.onBeforeRequest((request: OnBeforeRequestListenerDetails, callback) => {
+    const url = new URL(request.url);
+    if (['http', 'https', 'file', 'ftp'].some((v) => request.url.startsWith(v))) {
+      const { frame } = request;
+      if (frame == null) {
+        return callback({ cancel: true });
+      }
+
+      if (url.host.endsWith(".raytu.be") || url.host === "raytu.be") {
+        return callback({ cancel: false });
+      }
+
+      // TODO: Handle permissions of each module. For now though...
+      callback({ cancel: true });
+    }
+    callback({});
+  });
+};

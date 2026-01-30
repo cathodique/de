@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Test</title>
+	<script src="/.common/setup.js" type="module"></script>
+</head>
+<body>
+    <div id="window_manager" style="position:absolute; inset:0;">
+        <p>Hello World</p>
+    </div>
+    <script type="module">
+        import { Component, Resolver, componentList, setupElement } from "/.common/bundle.js";
+
+        class WindowManager extends Component {
+            $output = document.querySelector("#window_manager").cloneNode(true);
+
+            #windowFrameModule;
+            #windowRegistry;
+            windowFrames = new Map(); // Window to WindowFrame
+
+            static async create() {
+                const windowFrameModule = await Resolver.getDependency("WindowFrame");
+                const windowRegistry = await Resolver.summon("Cathodique::Window.WindowRegistry");
+
+                return new WindowManager(windowFrameModule, windowRegistry);
+            }
+
+            constructor(windowFrameModule, windowRegistry) {
+                super();
+
+                setupElement(this.$output);
+                // windowRegistry.$hello();
+
+                this.#windowFrameModule = windowFrameModule;
+                this.#windowRegistry = windowRegistry;
+
+                this.#windowRegistry.on("newWindow", this.newWindow.bind(this));
+            }
+            async newWindow(window) {
+                // window is a window component :3
+                const WindowFrame = this.#windowFrameModule.get("WindowFrame");
+                const windowFrame = await WindowFrame.create(window);
+                this.windowFrames.set(window, windowFrame);
+
+                const windowFrameElement = await windowFrame.$output;
+                windowFrameElement.style.position = "absolute";
+                windowFrameElement.style.top = "0";
+                windowFrameElement.style.left = "0";
+                this.$output.append(windowFrameElement);
+                this.windowInitDragStart(windowFrame, windowFrameElement);
+            }
+
+            windowInitDragStart(windowFrame, windowFrameElement) {
+                windowFrame.on("dragstart", () => {
+                    // let lastEvent = undefined;
+                    // const onMove = (event) => {
+                    //     if (lastEvent) {
+                    //         // console.log(event);
+                    //         let leftValue = parseInt(window.getComputedStyle(windowFrameElement).left);
+                    //         let topValue = parseInt(window.getComputedStyle(windowFrameElement).top);
+                    //         windowFrameElement.style.left = `${leftValue - lastEvent.clientX + event.clientX}px`;
+                    //         windowFrameElement.style.top = `${topValue - lastEvent.clientY + event.clientY}px`;
+                    //     }
+                    //     lastEvent = event;
+                    // };
+
+                    // this.$output.addEventListener("mousemove", onMove);
+                    // windowFrame.once("dragend", () => {
+                    //     console.log("DRAG ENDED");
+                    //     this.$output.removeEventListener("mousemove", onMove);
+                    // });
+                });
+            }
+        }
+        componentList.register("WindowManager", WindowManager);
+        componentList.markReady();
+    </script>
+</body>
+</html>
