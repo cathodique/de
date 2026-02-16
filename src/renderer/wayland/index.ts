@@ -9,7 +9,7 @@ import { seatRegistry } from "./overlays/seatRegistryOverlay.js";
 import { outputRegistry } from "./overlays/outputRegistryOverlay.js";
 import { strutRegistry } from "./overlays/strutRegistryOverlay.js";
 import { objectHandlers } from "../classes/handlers/handlers.js";
-import { orchestrator } from "../host/index.js";
+import { Reactive } from "@cathodique/wl-serv-high/lib";
 
 // HERE
 // TODO:::
@@ -27,22 +27,12 @@ export function isInRegion(reg: RegRectangle[], y: number, x: number, defaultVal
   );
 }
 
-const mySeatConfig = {
+const mySeatConfig = new Reactive({
   name: "seat0",
   capabilities: 3,
-};
+});
 seatRegistry.addAuthority(mySeatConfig);
 export const seat = seatRegistry.seatOfCfg(mySeatConfig)!;
-
-const myOutputConfig = {
-  x: 0,
-  y: 0,
-  w: 1920,
-  h: 1080,
-  effectiveW: 1920,
-  effectiveH: 1080,
-};
-outputRegistry.addAuthority(myOutputConfig);
 
 const compo = new HLCompositor({
   wl_registry: {
@@ -76,9 +66,4 @@ compo.on("ready", () => {
 
   ipcRenderer.send("addToDeleteQueue", compo.params.socketPath);
   ipcRenderer.send(`Ready at ${compo.params.socketPath}.lock`);
-});
-
-orchestrator.load("WindowManager").then(async (mod) => {
-  const stuff = await mod!.localHandle.get("WindowManager")!.create();
-  document.body.append(await stuff.$output);
 });

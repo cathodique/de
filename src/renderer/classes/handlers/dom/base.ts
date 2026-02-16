@@ -1,9 +1,15 @@
 import { BaseObject } from "@cathodique/wl-serv-high/objects";
+import { EventEmitter } from "events";
 
-export class BaseDom<From extends BaseObject, To extends Element> {
+export class BaseDom<
+  From extends BaseObject,
+  To extends Element,
+  EvtMap extends Record<string, any[]> = Record<string, any[]>,
+> extends EventEmitter<EvtMap> {
   wl: From;
   dom: To;
   constructor(wl: From, dom: To) {
+    super();
     this.wl = wl;
     this.dom = dom;
 

@@ -1,7 +1,7 @@
 import { WlSubsurface, WlSurface, XdgPopup, XdgToplevel } from "@cathodique/wl-serv-high/objects";
 import { PopupDom } from "./dom/popup.js";
-import { ToplevelDom } from "../../host/localModules/window_toplevel.js";
-import { PolyMap } from "../../host/classes/polymap.js";
+import { ToplevelDom } from "./dom/window_toplevel.js";
+import { PolyMap } from "../../utils/polyMap.js";
 import { SurfaceDom } from "./dom/surface.js";
 import { SubsurfaceDom } from "./dom/subsurface.js";
 

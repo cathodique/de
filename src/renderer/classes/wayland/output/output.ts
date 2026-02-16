@@ -1,10 +1,11 @@
+import { Reactive } from "@cathodique/wl-serv-high/lib";
 import { OutputConfiguration, OutputRegistry } from "@cathodique/wl-serv-high/registries";
 
 export class Output {
-  configToOutput = new Map<OutputConfiguration, Output>();
+  configToOutput = new Map<Reactive<OutputConfiguration>, Output>();
 
   wlOutputReg: OutputRegistry;
-  config: OutputConfiguration;
+  config: Reactive<OutputConfiguration>;
   dom = document.createElement("div");
   get wlOutputAuth() {
     const result = this.wlOutputReg.get(this.config);
@@ -12,7 +13,7 @@ export class Output {
     return result;
   }
 
-  constructor(config: OutputConfiguration, seatReg: OutputRegistry) {
+  constructor(config: Reactive<OutputConfiguration>, seatReg: OutputRegistry) {
     this.wlOutputReg = seatReg;
     this.config = config;
 
@@ -22,10 +23,10 @@ export class Output {
   initOutput() {
     this.dom.style.position = "absolute";
     this.dom.style.pointerEvents = "none";
-    this.dom.style.top = `${this.config.x}px`;
-    this.dom.style.left = `${this.config.y}px`;
-    this.dom.style.width = `${this.config.w}px`;
-    this.dom.style.height = `${this.config.h}px`;
+    this.dom.style.top = `${this.config.value.x}px`;
+    this.dom.style.left = `${this.config.value.y}px`;
+    this.dom.style.width = `${this.config.value.w}px`;
+    this.dom.style.height = `${this.config.value.h}px`;
 
     document.body.append(this.dom);
   }

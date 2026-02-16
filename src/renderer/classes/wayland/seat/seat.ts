@@ -3,6 +3,7 @@ import { Modifiers } from "./modifiers.js";
 import { codeToScan } from "./codeToScancode.js";
 import { SurfaceDom } from "../../handlers/dom/surface.js";
 import { isInRegion } from "../../../wayland/index.js";
+import { Reactive } from "@cathodique/wl-serv-high/lib";
 
 export class Seat {
   static mouseWebToButtonMap: Record<string, number> = {
@@ -14,7 +15,7 @@ export class Seat {
   };
 
   wlSeatReg: SeatRegistry;
-  config: SeatConfiguration;
+  config: Reactive<SeatConfiguration>;
   get wlSeatAuth() {
     const result = this.wlSeatReg.get(this.config);
     if (!result) throw new Error();
@@ -26,7 +27,7 @@ export class Seat {
   mouseFocus?: { instances: SeatInstances, surface: SurfaceDom };
 
   modifiers: Modifiers;
-  constructor(config: SeatConfiguration, seatReg: SeatRegistry) {
+  constructor(config: Reactive<SeatConfiguration>, seatReg: SeatRegistry) {
     this.wlSeatReg = seatReg;
     this.config = config;
     this.modifiers = new Modifiers(this);

@@ -31,29 +31,6 @@ export const registerProtocols = () => {
     }
   });
 
-  protocol.handle('https', (request) => {
-    const reqUrl = new URL(request.url);
-
-    if (reqUrl.pathname.split('/').some((v) => v === '.' || v === '..')) { // Path accesses
-      return new Response("Forbidden", { status: 403 });
-    }
-
-    const [tld, sld, ...rest] = reqUrl.host.split('.').toReversed();
-    const domain = `${sld}.${tld}`;
-
-    switch (domain) {
-      case "raytu.be": {
-        if (reqUrl.pathname.startsWith('/.common/')) {
-          return net.fetch(pathToFileURL(join(__dirname, '../modules', reqUrl.pathname)).toString());
-        }
-
-        return net.fetch(pathToFileURL(join(__dirname, '../modules', rest.join('.'), reqUrl.pathname)).toString());
-      }
-    }
-
-    return new Response("Not found", { status: 404 });
-  });
-
   session.defaultSession.webRequest.onBeforeRequest((request: OnBeforeRequestListenerDetails, callback) => {
     const url = new URL(request.url);
     if (['http', 'https', 'file', 'ftp'].some((v) => request.url.startsWith(v))) {

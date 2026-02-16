@@ -1,5 +1,6 @@
 import { SeatConfiguration, SeatRegistry } from "@cathodique/wl-serv-high/registries";
 import { Seat } from "../../classes/wayland/seat/seat";
+import { Reactive } from "@cathodique/wl-serv-high/lib";
 
 class SeatRegistryOverlay extends SeatRegistry {
   // Singleton
@@ -14,15 +15,15 @@ class SeatRegistryOverlay extends SeatRegistry {
   }
 
   // TODO Memory management
-  seats = new Map<SeatConfiguration, Seat>();
+  seats = new Map<Reactive<SeatConfiguration>, Seat>();
   allSeats() {
     return this.seats.values();
   }
-  seatOfCfg(config: SeatConfiguration) {
+  seatOfCfg(config: Reactive<SeatConfiguration>) {
     return this.seats.get(config);
   }
 
-  addAuthority(cfg: SeatConfiguration) {
+  addAuthority(cfg: Reactive<SeatConfiguration>) {
     super.addAuthority(cfg);
     this.seats.set(cfg, new Seat(cfg, this));
   }

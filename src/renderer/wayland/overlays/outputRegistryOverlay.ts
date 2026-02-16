@@ -1,5 +1,6 @@
 import { OutputConfiguration, OutputRegistry } from "@cathodique/wl-serv-high/registries";
 import { Output } from "../../classes/wayland/output/output";
+import { Reactive } from "@cathodique/wl-serv-high/lib";
 
 class OutputRegistryOverlay extends OutputRegistry {
   // Singleton
@@ -14,15 +15,15 @@ class OutputRegistryOverlay extends OutputRegistry {
   }
 
   // TODO Memory management
-  outputs = new Map<OutputConfiguration, Output>();
+  outputs = new Map<Reactive<OutputConfiguration>, Output>();
   allOutputs() {
     return this.outputs.values();
   }
-  outputOfCfg(config: OutputConfiguration) {
+  outputOfCfg(config: Reactive<OutputConfiguration>) {
     return this.outputs.get(config);
   }
 
-  addAuthority(cfg: OutputConfiguration) {
+  addAuthority(cfg: Reactive<OutputConfiguration>) {
     super.addAuthority(cfg);
     this.outputs.set(cfg, new Output(cfg, this));
   }

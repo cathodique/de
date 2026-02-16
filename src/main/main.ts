@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import argv from "@cathodique/simple-argv";
 import { rmSync } from "node:fs";
 
 import { registerProtocols } from "./protocols.js";
@@ -17,7 +18,7 @@ const createWindow = () => {
   registerProtocols();
 
   win.webContents.openDevTools({ mode: "detach" });
-  win.loadURL("app://top/index.html");
+  win.loadURL(`app://top/index.html${new URLSearchParams(argv).toString()}`);
 };
 
 const deleteQueue: string[] = [];
