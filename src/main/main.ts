@@ -1,13 +1,13 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-import argv from "@cathodique/simple-argv";
+import rawArgv from "@cathodique/simple-argv";
 import { rmSync } from "node:fs";
-
 import { registerProtocols } from "./protocols.js";
+
+const argv = (rawArgv as any)?.default ?? rawArgv ?? {};
+const deleteQueue: string[] = [];
 
 const createWindow = () => {
   const win = new BrowserWindow({
-    // fullscreen: true,
-    // resizable: false,
     webPreferences: {
       nodeIntegration: true,
       nodeIntegrationInSubFrames: false,
@@ -15,40 +15,37 @@ const createWindow = () => {
     },
   });
 
-  registerProtocols();
-
   win.webContents.openDevTools({ mode: "detach" });
-  win.loadURL(`app://top/index.html${new URLSearchParams(argv).toString()}`);
+  const qs = Object.keys(argv).length ? `?${new URLSearchParams(argv).toString()}` : "";
+  win.loadURL(`app://top/index.html${qs}`);
 };
 
-const deleteQueue: string[] = [];
-
 app.whenReady().then(() => {
-  ipcMain.on("addToDeleteQueue", (_, arg1: string) => deleteQueue.push(arg1));
+  registerProtocols();
+
+  ipcMain.on("addToDeleteQueue", (_, arg1: string) => {
+    if (typeof arg1 === "string" && !deleteQueue.includes(arg1)) {
+      deleteQueue.push(arg1);
+    }
+  });
+
   createWindow();
 });
 
 function handleClose() {
   for (const file of deleteQueue) {
-    if (!file.match(/^\/run\/user\/\d+\/wayland-\d+(.lock)?$/g)) continue;
-
+    if (!file.match(/^\/run\/user\/\d+\/wayland-\d+(.lock)?$/)) continue;
     try {
-      rmSync(file);
-    } catch (e) {
-      const err = e as any;
-
-      if (err.code === "ENOENT") return; // Whatevs
-      throw e;
-    }
+      rmSync(file, { force: true });
+    } catch {}
   }
 }
 
 app.on("window-all-closed", () => {
   handleClose();
-
   app.quit();
 });
 
-[`exit`, `SIGINT`, `uncaughtException`, `SIGTERM`].forEach((eventType) => {
+["exit", "SIGINT", "uncaughtException", "SIGTERM"].forEach((eventType) => {
   process.on(eventType, handleClose);
 });

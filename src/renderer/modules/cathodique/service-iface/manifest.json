@@ -1,0 +1,13 @@
+{
+  "id": "@cathodique/service-iface",
+  "name": "service-iface",
+  "type": "interface",
+  "version": "1.0.0",
+  "description": "Background Service Daemon Interface",
+  "main": "index.js",
+  "exportMap": {
+    "start": { "type": "function", "required": true },
+    "stop": { "type": "function", "required": true },
+    "status": { "type": "function", "required": false }
+  }
+}

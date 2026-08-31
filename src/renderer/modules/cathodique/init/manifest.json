@@ -1,0 +1,10 @@
+{
+  "id": "@cathodique/init",
+  "name": "init",
+  "version": "1.0.0",
+  "description": "Cathodique Desktop Environment Privileged Bootstrapper & Subsystem Orchestrator",
+  "main": "index.js",
+  "interface": "@cathodique/init-iface",
+  "priority": 1000,
+  "capabilities": ["system:bootstrap", "compartment:orchestrate", "dom:export"]
+}

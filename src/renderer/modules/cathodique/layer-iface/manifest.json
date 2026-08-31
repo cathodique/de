@@ -1,0 +1,13 @@
+{
+  "id": "@cathodique/layer-iface",
+  "name": "layer-iface",
+  "type": "interface",
+  "version": "1.0.0",
+  "description": "Compositor Layer Management Interface",
+  "main": "index.js",
+  "exportMap": {
+    "createLayer": { "type": "function", "required": true },
+    "getLayer": { "type": "function", "required": true },
+    "listLayers": { "type": "function", "required": true }
+  }
+}

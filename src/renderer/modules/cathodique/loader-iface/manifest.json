@@ -1,0 +1,13 @@
+{
+  "id": "@cathodique/loader-iface",
+  "name": "loader-iface",
+  "type": "interface",
+  "version": "1.0.0",
+  "description": "Module Loader and Interface Resolution Subsystem Specification",
+  "main": "index.js",
+  "exportMap": {
+    "loadModule": { "type": "function", "required": true },
+    "spawn": { "type": "function", "required": true },
+    "resolve": { "type": "function", "required": true }
+  }
+}

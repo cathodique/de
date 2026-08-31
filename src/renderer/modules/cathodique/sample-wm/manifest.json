@@ -1,0 +1,11 @@
+{
+  "id": "@cathodique/sample-wm",
+  "name": "sample-wm",
+  "version": "1.0.0",
+  "description": "Reference Window Manager module for Cathodique DE",
+  "main": "index.js",
+  "interface": "@cathodique/wm-iface",
+  "priority": 100,
+  "capabilities": ["dom:export", "dom:render", "window:create"],
+  "assets": ["assets/"]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "@cathodique/init-iface",
+  "name": "init-iface",
+  "type": "interface",
+  "version": "1.0.0",
+  "description": "Desktop Environment Privileged Bootstrapper & Spawner Interface",
+  "main": "index.js",
+  "exportMap": {
+    "init": { "type": "function", "required": true },
+    "default": { "type": "any", "required": false }
+  }
+}

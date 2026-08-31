@@ -1,0 +1,15 @@
+{
+  "id": "@cathodique/wm-iface",
+  "name": "wm-iface",
+  "type": "interface",
+  "version": "1.0.0",
+  "description": "Cathodique Window Management Interface",
+  "main": "index.js",
+  "exportMap": {
+    "createWindow": { "type": "function", "required": true },
+    "manageWindow": { "type": "function", "required": false },
+    "closeWindow": { "type": "function", "required": true },
+    "listWindows": { "type": "function", "required": true },
+    "getWorkspaceElement": { "type": "function", "required": false }
+  }
+}

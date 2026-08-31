@@ -1,0 +1,9 @@
+{
+  "id": "@cathodique/sample-service",
+  "name": "sample-service",
+  "version": "1.0.0",
+  "description": "Reference Service Module for Cathodique",
+  "main": "index.js",
+  "interface": "@cathodique/service-iface",
+  "priority": 80
+}
