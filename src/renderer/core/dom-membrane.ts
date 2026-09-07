@@ -15,6 +15,8 @@ export class DomMembrane implements DomMembraneApi {
   private realToProxy = new WeakMap<Node, Map<string, any>>();
   private proxyToReal = new WeakMap<any, Node>();
   private objectProxies = new WeakMap<object, Map<string, any>>();
+  private styleProxies = new WeakMap<Node, Map<string, any>>();
+  private classListProxies = new WeakMap<Node, Map<string, any>>();
 
   private iframeDocument: Document | null = null;
   private desktopRoot: HTMLElement | null = null;
@@ -56,7 +58,13 @@ export class DomMembrane implements DomMembraneApi {
     const realNode = this.unwrapNode(node);
     const owner = this.nodeOwners.get(realNode);
     if (!owner || owner === callerId) return true;
-    return callerId === "@cathodique/init" || callerId === "host" || callerId === "system";
+    return (
+      callerId === "@cathodique/init" ||
+      callerId === "cathodique/init" ||
+      callerId === "init" ||
+      callerId === "host" ||
+      callerId === "system"
+    );
   }
 
   public wrapNode<T extends Node>(node: T, domainId: string): T {
@@ -78,41 +86,61 @@ export class DomMembrane implements DomMembraneApi {
         if (prop === MEMBRANE_TARGET) return target;
         if (prop === MEMBRANE_DOMAIN) return domainId;
 
-        // 1. style proxying
+        // 1. style proxying (cached per realNode and domainId)
         if (prop === "style" && target.style) {
-          return new Proxy(target.style, {
-            get(st, sp) {
-              const val = (st as any)[sp];
-              return typeof val === "function" ? val.bind(st) : val;
-            },
-            set(st, sp, val) {
-              if (!membrane.canMutate(target, domainId)) {
-                throw new Error(`[DOM Membrane] '${domainId}' cannot mutate style of node owned by '${membrane.getOwner(target)}'.`);
-              }
-              (st as any)[sp] = val;
-              return true;
-            },
-          });
+          let styleMap = membrane.styleProxies.get(realNode);
+          if (!styleMap) {
+            styleMap = new Map<string, any>();
+            membrane.styleProxies.set(realNode, styleMap);
+          }
+          let styleProxy = styleMap.get(domainId);
+          if (!styleProxy) {
+            styleProxy = new Proxy(target.style, {
+              get(st, sp) {
+                const val = (st as any)[sp];
+                return typeof val === "function" ? val.bind(st) : val;
+              },
+              set(st, sp, val) {
+                if (!membrane.canMutate(target, domainId)) {
+                  throw new Error(`[DOM Membrane] '${domainId}' cannot mutate style of node owned by '${membrane.getOwner(target)}'.`);
+                }
+                (st as any)[sp] = val;
+                return true;
+              },
+            });
+            styleMap.set(domainId, styleProxy);
+          }
+          return styleProxy;
         }
 
-        // 2. classList proxying
+        // 2. classList proxying (cached per realNode and domainId)
         if (prop === "classList" && target.classList) {
-          return new Proxy(target.classList, {
-            get(cl, cp) {
-              const val = (cl as any)[cp];
-              if (typeof val === "function") {
-                return function (...args: any[]) {
-                  if (cp === "add" || cp === "remove" || cp === "toggle" || cp === "replace") {
-                    if (!membrane.canMutate(target, domainId)) {
-                      throw new Error(`[DOM Membrane] '${domainId}' cannot modify classList of node owned by '${membrane.getOwner(target)}'.`);
+          let classListMap = membrane.classListProxies.get(realNode);
+          if (!classListMap) {
+            classListMap = new Map<string, any>();
+            membrane.classListProxies.set(realNode, classListMap);
+          }
+          let clProxy = classListMap.get(domainId);
+          if (!clProxy) {
+            clProxy = new Proxy(target.classList, {
+              get(cl, cp) {
+                const val = (cl as any)[cp];
+                if (typeof val === "function") {
+                  return function (...args: any[]) {
+                    if (cp === "add" || cp === "remove" || cp === "toggle" || cp === "replace") {
+                      if (!membrane.canMutate(target, domainId)) {
+                        throw new Error(`[DOM Membrane] '${domainId}' cannot modify classList of node owned by '${membrane.getOwner(target)}'.`);
+                      }
                     }
-                  }
-                  return (cl as any)[cp](...args);
-                };
-              }
-              return val;
-            },
-          });
+                    return (cl as any)[cp].apply(cl, args);
+                  };
+                }
+                return val;
+              },
+            });
+            classListMap.set(domainId, clProxy);
+          }
+          return clProxy;
         }
 
         // 3. Child collection & navigation
@@ -120,15 +148,23 @@ export class DomMembrane implements DomMembraneApi {
           const col = target[prop];
           return col ? Array.from(col).map((c: any) => membrane.wrapNode(c, domainId)) : col;
         }
-        if (prop === "parentNode" || prop === "parentElement" || prop === "firstChild" || prop === "lastChild" || prop === "nextSibling" || prop === "previousSibling" || prop === "shadowRoot") {
+        if (
+          prop === "parentNode" ||
+          prop === "parentElement" ||
+          prop === "firstChild" ||
+          prop === "lastChild" ||
+          prop === "nextSibling" ||
+          prop === "previousSibling" ||
+          prop === "shadowRoot"
+        ) {
           const rel = target[prop];
           return rel ? membrane.wrapNode(rel, domainId) : rel;
         }
 
-        // 4. Methods
+        // 4. Methods (bind receiver correctly to prevent Illegal Invocation)
         const val = target[prop];
         if (typeof val === "function") {
-          return function (...args: any[]) {
+          return function (this: any, ...args: any[]) {
             const unwrappedArgs = args.map((a) => membrane.unwrapNode(a));
 
             if (prop === "appendChild" || prop === "insertBefore") {
@@ -136,16 +172,28 @@ export class DomMembrane implements DomMembraneApi {
                 throw new Error(`[DOM Membrane] '${domainId}' cannot append to node owned by '${membrane.getOwner(target)}'.`);
               }
               const child = unwrappedArgs[0];
-              if (child && typeof child === "object" && child.nodeType && !membrane.getOwner(child)) {
-                membrane.claimNode(child, domainId);
+              if (child && typeof child === "object" && child.nodeType) {
+                if (target.ownerDocument && child.ownerDocument && child.ownerDocument !== target.ownerDocument) {
+                  target.ownerDocument.adoptNode(child);
+                }
+                if (!membrane.getOwner(child)) {
+                  membrane.claimNode(child, domainId);
+                }
               }
-            } else if (prop === "removeChild" || prop === "replaceChild" || prop === "setAttribute" || prop === "removeAttribute" || prop === "attachShadow") {
+            } else if (
+              prop === "removeChild" ||
+              prop === "replaceChild" ||
+              prop === "setAttribute" ||
+              prop === "removeAttribute" ||
+              prop === "attachShadow"
+            ) {
               if (!membrane.canMutate(target, domainId)) {
                 throw new Error(`[DOM Membrane] '${domainId}' cannot mutate node owned by '${membrane.getOwner(target)}'.`);
               }
             }
 
-            const res = target[prop](...unwrappedArgs);
+            const callThis = membrane.unwrapNode(this) ?? target;
+            const res = target[prop].apply(callThis, unwrappedArgs);
             return res && typeof res === "object" && res.nodeType ? membrane.wrapNode(res, domainId) : res;
           };
         }
@@ -179,9 +227,12 @@ export class DomMembrane implements DomMembraneApi {
         if (prop === MEMBRANE_TARGET) return target;
         if (prop === MEMBRANE_DOMAIN) return domainId;
 
+        // Ensure creation points to active iframe viewport document if available
+        const activeDoc = membrane.iframeDocument ?? target;
+
         if (prop === "createElement" || prop === "createElementNS" || prop === "createTextNode" || prop === "createDocumentFragment") {
           return function (...args: any[]) {
-            const raw = target[prop](...args);
+            const raw = activeDoc[prop](...args);
             membrane.claimNode(raw, domainId);
             return membrane.wrapNode(raw, domainId);
           };
@@ -189,7 +240,7 @@ export class DomMembrane implements DomMembraneApi {
 
         if (prop === "importNode" || prop === "adoptNode") {
           return function (ext: any, ...rest: any[]) {
-            const raw = target[prop](membrane.unwrapNode(ext), ...rest);
+            const raw = activeDoc[prop](membrane.unwrapNode(ext), ...rest);
             membrane.claimNode(raw, domainId);
             return membrane.wrapNode(raw, domainId);
           };
@@ -199,11 +250,12 @@ export class DomMembrane implements DomMembraneApi {
           throw new Error(`[DOM Membrane] Direct access to '${String(prop)}' is restricted for security.`);
         }
 
-        const val = target[prop];
+        const val = (activeDoc as any)[prop] ?? target[prop];
         if (typeof val === "function") {
-          return function (...args: any[]) {
+          return function (this: any, ...args: any[]) {
             const unwrappedArgs = args.map((a) => membrane.unwrapNode(a));
-            const res = target[prop](...unwrappedArgs);
+            const callThis = membrane.unwrapNode(this) ?? activeDoc;
+            const res = val.apply(callThis, unwrappedArgs);
             return res && typeof res === "object" && res.nodeType ? membrane.wrapNode(res, domainId) : res;
           };
         }
@@ -225,20 +277,6 @@ export class DomMembrane implements DomMembraneApi {
       return this.wrapNode(this.unwrapNode(value), targetDomain) as unknown as T;
     }
 
-    if (typeof value === "function") {
-      return function (this: any, ...args: any[]) {
-        const trArgs = args.map((a) => membrane.wrap(a, targetDomain, sourceDomain));
-        const res = (value as Function).apply(this, trArgs);
-        if (res && typeof res.then === "function") {
-          return res.then(
-            (r: any) => membrane.wrap(r, sourceDomain, targetDomain),
-            (e: any) => Promise.reject(membrane.wrap(e, sourceDomain, targetDomain))
-          );
-        }
-        return membrane.wrap(res, sourceDomain, targetDomain);
-      } as unknown as T;
-    }
-
     let domainMap = this.objectProxies.get(value as object);
     if (!domainMap) {
       domainMap = new Map<string, any>();
@@ -248,7 +286,26 @@ export class DomMembrane implements DomMembraneApi {
 
     const proxy = new Proxy(value as object, {
       get(target, prop) {
-        return membrane.wrap(Reflect.get(target, prop, target), sourceDomain, targetDomain);
+        if (prop === MEMBRANE_TARGET) return target;
+        if (prop === MEMBRANE_DOMAIN) return targetDomain;
+
+        const val = Reflect.get(target, prop, target);
+        if (typeof val === "function") {
+          return function (this: any, ...args: any[]) {
+            const trArgs = args.map((a) => membrane.wrap(a, targetDomain, sourceDomain));
+            // Always bind underlying un-proxied receiver target to avoid Illegal Invocation
+            const callThis = (this === proxy || !this || this[MEMBRANE_TARGET]) ? target : (membrane.unwrapNode(this) ?? target);
+            const res = (val as Function).apply(callThis, trArgs);
+            if (res && typeof res.then === "function") {
+              return res.then(
+                (r: any) => membrane.wrap(r, sourceDomain, targetDomain),
+                (e: any) => Promise.reject(membrane.wrap(e, sourceDomain, targetDomain))
+              );
+            }
+            return membrane.wrap(res, sourceDomain, targetDomain);
+          };
+        }
+        return membrane.wrap(val, sourceDomain, targetDomain);
       },
       set(target, prop, val) {
         return Reflect.set(target, prop, membrane.wrap(val, targetDomain, sourceDomain), target);
@@ -264,38 +321,30 @@ export class DomMembrane implements DomMembraneApi {
     if (!iframeDoc) throw new Error("[DOM Membrane] Failed to access scriptless iframe contentDocument.");
 
     this.iframeDocument = iframeDoc;
-    iframeDoc.open();
-    iframeDoc.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-          html, body {
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background: #000;
-            user-select: none;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          }
-          #cathodique-desktop-root {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-          }
-        </style>
-      </head>
-      <body>
-        <div id="cathodique-desktop-root"></div>
-      </body>
-      </html>
-    `);
-    iframeDoc.close();
+    const style = iframeDoc.createElement("style");
+    style.textContent = `
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        background: #0d1117;
+        user-select: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      #cathodique-desktop-root {
+        position: absolute;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+      }
+    `;
+    iframeDoc.head.appendChild(style);
 
-    const root = iframeDoc.getElementById("cathodique-desktop-root") as HTMLElement;
+    const root = iframeDoc.createElement("div");
+    root.id = "cathodique-desktop-root";
+    iframeDoc.body.appendChild(root);
     this.desktopRoot = root;
     this.claimNode(root, "@cathodique/init");
 
@@ -309,3 +358,5 @@ export class DomMembrane implements DomMembraneApi {
     return this.desktopRoot;
   }
 }
+
+export default DomMembrane;

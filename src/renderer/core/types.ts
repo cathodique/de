@@ -35,13 +35,23 @@ export interface InterfaceDefinition<T = unknown> {
   validate?: (exports: Record<string, unknown>) => boolean | string;
 }
 
+export type ExportEntry =
+  | string
+  | {
+      import?: string;
+      implements?: string | string[];
+      capabilities?: string[];
+      [key: string]: unknown;
+    };
+
 export interface ModuleMetadata {
   id: string;
   name?: string;
-  type?: "module" | "interface";
+  type?: "module" | "interface" | "init";
   interface?: string;
   interfaceName?: string;
-  implements?: string[];
+  implements?: string | string[] | Record<string, string | string[]>;
+  exports?: Record<string, ExportEntry>;
   version?: string;
   description?: string;
   main?: string;
@@ -87,10 +97,9 @@ export interface ModuleLoaderConfig {
   baseURL?: string;
   cdnURL?: string;
   initModule?: string;
-  firstModule?: string;
-  interfaces?: Record<string, string>;
   defaultEndowments?: Record<string, unknown>;
   hostModules?: Record<string, any>;
+  modules?: Record<string, any>;
   wayland?: {
     enabled?: boolean;
     socketPath?: string;
@@ -108,19 +117,17 @@ export interface InitModuleContext {
   wlServHighRegistries?: any;
   iframeElement?: HTMLIFrameElement;
   membrane: DomMembraneApi;
+  manifest?: ModuleMetadata;
+  DmabufBridgeClient?: any;
+  [key: string]: any;
 }
 
 export interface ModuleLoaderApi {
-  registerInterface<T>(definition: InterfaceDefinition<T>): void;
-  loadInterface<T = unknown>(interfaceId: string): Promise<InterfaceDefinition<T>>;
-  getInterface<T>(name: string): InterfaceDefinition<T> | undefined;
-  listRegisteredInterfaces(): InterfaceDefinition<any>[];
-  discoverImplementingModules(interfaceName: string): Promise<ModuleMetadata[]>;
   registerModule(record: ModuleRecord): void;
   registerHostModule(specifier: string, exportsNamespace: Record<string, unknown>): void;
   loadManifest(moduleId: string): Promise<ModuleMetadata | null>;
-  loadModule<T = unknown>(moduleId: string, options?: { isInit?: boolean; interfaceName?: string }): Promise<ModuleInstance<T>>;
-  spawn<T = unknown>(interfaceName: string, moduleId?: string): Promise<T>;
-  resolve<T = unknown>(interfaceName: string): T | undefined;
-  resolveModuleId(interfaceName: string, preferredModuleId?: string): string;
+  loadModule<T = unknown>(moduleId: string, options?: { isInit?: boolean }): Promise<ModuleInstance<T>>;
+  spawn<T = unknown>(moduleId: string, ...args: any[]): Promise<T>;
+  resolve<T = unknown>(moduleId: string): T | undefined;
+  resolveModuleId(moduleId: string): string;
 }

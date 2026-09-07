@@ -5,107 +5,164 @@
  */
 
 import type { CompartmentOptions, ModuleDescriptor } from "ses";
-import rawInforma from "informa";
+import $ from "informa";
+import { Fault, ConsumerFault, ProviderFault } from "./fault.js";
+import { compileModuleSource } from "./ses-env.js";
 
-const $ = (rawInforma as any)?.default ?? rawInforma;
+export { compileModuleSource };
+
 const INFORMA_GLOBAL_KEY = "__INFORMA__";
 
 export interface CreateCompartmentOptions {
   name: string;
   isInit?: boolean;
+  isInterface?: boolean;
+  capabilities?: string[];
   endowments?: Record<string, unknown>;
   resolveHook?: (specifier: string, referrer: string) => string;
   importHook?: (specifier: string) => Promise<ModuleDescriptor>;
   moduleMap?: Record<string, ModuleDescriptor>;
 }
 
-export function createModuleCompartment(options: CreateCompartmentOptions): Compartment {
-  const { name, isInit = false, endowments = {}, resolveHook, importHook, moduleMap } = options;
+function collectDomClasses(): Record<string, unknown> {
+  const domClasses: Record<string, unknown> = {};
+  if (typeof globalThis === "undefined") return domClasses;
 
-  let globals: Record<string, unknown>;
-
-  if (isInit) {
-    // Privileged Init Compartment: provides full host environment access including require and $
-    globals = Object.create(globalThis);
-    globals.console = typeof console !== "undefined" ? console : (globalThis as any).console;
-    globals.process = typeof process !== "undefined" ? process : (globalThis as any).process;
-    globals.require = typeof require !== "undefined" ? require : (globalThis as any).require;
-    globals.$ = $;
-    globals.setTimeout = typeof setTimeout !== "undefined" ? setTimeout.bind(globalThis) : undefined;
-    globals.clearTimeout = typeof clearTimeout !== "undefined" ? clearTimeout.bind(globalThis) : undefined;
-    globals.setInterval = typeof setInterval !== "undefined" ? setInterval.bind(globalThis) : undefined;
-    globals.clearInterval = typeof clearInterval !== "undefined" ? clearInterval.bind(globalThis) : undefined;
-
-    for (const [key, value] of Object.entries(endowments)) {
-      Object.defineProperty(globals, key, {
-        value,
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+  const propNames = Object.getOwnPropertyNames(globalThis);
+  for (const name of propNames) {
+    if (name === "window" || name === "document" || name === "top" || name === "parent" || name === "self") {
+      continue;
     }
-  } else {
-    // Sandboxed Guest Compartment with $ and safe host module require available
-    globals = {
-      $: $,
-      require: (specifier: string) => {
-        if (specifier === "informa") return $;
-        throw new Error(`[Sandboxed Compartment '${name}'] Cannot require('${specifier}').`);
-      },
-      Date: typeof Date !== "undefined" ? Date : undefined,
-      Math: typeof Math !== "undefined" ? Math : undefined,
-      console: {
-        log: (...args: unknown[]) => console.log(`[${name}]`, ...args),
-        warn: (...args: unknown[]) => console.warn(`[${name}]`, ...args),
-        error: (...args: unknown[]) => console.error(`[${name}]`, ...args),
-        info: (...args: unknown[]) => console.info(`[${name}]`, ...args),
-        debug: (...args: unknown[]) => console.debug(`[${name}]`, ...args),
-      },
-      setTimeout: typeof setTimeout !== "undefined" ? setTimeout.bind(globalThis) : undefined,
-      clearTimeout: typeof clearTimeout !== "undefined" ? clearTimeout.bind(globalThis) : undefined,
-      setInterval: typeof setInterval !== "undefined" ? setInterval.bind(globalThis) : undefined,
-      clearInterval: typeof clearInterval !== "undefined" ? clearInterval.bind(globalThis) : undefined,
-      ...endowments,
-    };
-  }
 
-  // Pre-wire single __INFORMA__ key on globals
+    if (
+      name.startsWith("HTML") ||
+      name.startsWith("SVG") ||
+      name.startsWith("CSS") ||
+      name.startsWith("DOM") ||
+      name.endsWith("Event") ||
+      name.endsWith("Observer") ||
+      [
+        "Node",
+        "Element",
+        "DocumentFragment",
+        "Text",
+        "Comment",
+        "Attr",
+        "ImageData",
+        "Path2D",
+        "CanvasRenderingContext2D",
+        "OffscreenCanvas",
+        "Image",
+        "Audio",
+        "Option",
+        "Range",
+        "Selection",
+        "TreeWalker",
+        "NodeFilter",
+        "NodeIterator",
+        "MutationRecord",
+        "ResizeObserverEntry",
+        "IntersectionObserverEntry",
+      ].includes(name)
+    ) {
+      try {
+        const val = (globalThis as any)[name];
+        if (typeof val === "function") {
+          domClasses[name] = harden(val);
+        }
+      } catch {}
+    }
+  }
+  return domClasses;
+}
+
+export function createModuleCompartment(options: CreateCompartmentOptions): Compartment {
+  const {
+    name,
+    isInit = false,
+    isInterface = false,
+    capabilities = [],
+    endowments = {},
+    resolveHook,
+    importHook,
+    moduleMap,
+  } = options;
+
+  const hasCap = isInit || capabilities.some((c) =>
+    ["buffer", "cap-buffer", "host", "webgl", "canvas", "typedarray", "system", "dom"].includes(c)
+  );
+
+  const hasDomCap = isInit || capabilities.some((c) =>
+    ["dom", "dom:document", "dom:window", "host", "system", "canvas", "webgl"].includes(c)
+  );
+
+  const globals: Record<string, unknown> = {
+    $: harden($),
+    require: (s: string) => (s === "informa" ? $ : isInit && typeof require !== "undefined" ? require(s) : (() => { throw new Error(`[Compartment '${name}'] Cannot require('${s}').`); })()),
+    Date,
+    Math,
+    console: isInit ? console : harden({
+      log: (...args: unknown[]) => console.log(`[${name}]`, ...args),
+      warn: (...args: unknown[]) => console.warn(`[${name}]`, ...args),
+      error: (...args: unknown[]) => console.error(`[${name}]`, ...args),
+      info: (...args: unknown[]) => console.info(`[${name}]`, ...args),
+      debug: (...args: unknown[]) => console.debug(`[${name}]`, ...args),
+    }),
+    setTimeout: setTimeout.bind(globalThis),
+    clearTimeout: clearTimeout.bind(globalThis),
+    setInterval: setInterval.bind(globalThis),
+    clearInterval: clearInterval.bind(globalThis),
+    requestAnimationFrame: requestAnimationFrame.bind(globalThis),
+    cancelAnimationFrame: cancelAnimationFrame.bind(globalThis),
+    setImmediate: setImmediate.bind(globalThis),
+    clearImmediate: clearImmediate.bind(globalThis),
+    ...(isInit ? { process } : {}),
+    ...(isInit || isInterface ? {
+      Fault: harden(Fault),
+      ConsumerFault: harden(ConsumerFault),
+      ProviderFault: harden(ProviderFault),
+    } : {}),
+    ...(hasCap ? {
+      ...(typeof Buffer !== "undefined" ? { Buffer: harden(Buffer) } : {}),
+      Float32Array: harden(globalThis.Float32Array),
+      Float64Array: harden(globalThis.Float64Array),
+      Uint8Array: harden(globalThis.Uint8Array),
+      Uint16Array: harden(globalThis.Uint16Array),
+      Uint32Array: harden(globalThis.Uint32Array),
+      Uint8ClampedArray: harden(globalThis.Uint8ClampedArray),
+      Int8Array: harden(globalThis.Int8Array),
+      Int16Array: harden(globalThis.Int16Array),
+      Int32Array: harden(globalThis.Int32Array),
+      ArrayBuffer: harden(globalThis.ArrayBuffer),
+      DataView: harden(globalThis.DataView),
+      WebGLRenderingContext: harden((globalThis as any).WebGLRenderingContext),
+      WebGL2RenderingContext: harden((globalThis as any).WebGL2RenderingContext),
+      VideoFrame: harden((globalThis as any).VideoFrame),
+    } : {}),
+    ...(hasDomCap ? collectDomClasses() : {}),
+    ...endowments,
+  };
+
   Object.defineProperty(globals, INFORMA_GLOBAL_KEY, {
-    get() {
-      return Reflect.get(globalThis, INFORMA_GLOBAL_KEY);
-    },
-    set(v) {
-      Reflect.set(globalThis, INFORMA_GLOBAL_KEY, v);
-    },
+    get: () => ({
+      ...Reflect.get(globalThis, INFORMA_GLOBAL_KEY),
+      getGlobalStateMode: () => Reflect.get(globalThis, INFORMA_GLOBAL_KEY)?.mode,
+      setGlobalStateMode: (m: string) => {
+        const inf = Reflect.get(globalThis, INFORMA_GLOBAL_KEY);
+        if (inf) inf.mode = m;
+        return m;
+      },
+    }),
+    set: (v) => Reflect.set(globalThis, INFORMA_GLOBAL_KEY, v),
     configurable: true,
-    enumerable: false,
   });
 
-  const compartmentOptions: CompartmentOptions & { __options__: true } = {
+  return new Compartment({
     __options__: true,
     name,
     globals: globals as any,
-  };
-
-  if (resolveHook) compartmentOptions.resolveHook = resolveHook;
-  if (importHook) compartmentOptions.importHook = importHook;
-  if (moduleMap) compartmentOptions.modules = new Map(Object.entries(moduleMap)) as any;
-
-  const compartment = new Compartment(compartmentOptions);
-
-  // Wire __INFORMA__ onto compartment.globalThis
-  try {
-    Object.defineProperty(compartment.globalThis, INFORMA_GLOBAL_KEY, {
-      get() {
-        return Reflect.get(globalThis, INFORMA_GLOBAL_KEY);
-      },
-      set(v) {
-        Reflect.set(globalThis, INFORMA_GLOBAL_KEY, v);
-      },
-      configurable: true,
-      enumerable: false,
-    });
-  } catch {}
-
-  return compartment;
+    ...(resolveHook ? { resolveHook } : {}),
+    ...(importHook ? { importHook } : {}),
+    ...(moduleMap ? { modules: new Map(Object.entries(moduleMap)) as any } : {}),
+  } as CompartmentOptions & { __options__: true });
 }

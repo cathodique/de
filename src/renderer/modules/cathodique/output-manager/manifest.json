@@ -1,0 +1,10 @@
+{
+  "id": "@cathodique/output-manager",
+  "name": "output-manager",
+  "version": "1.0.0",
+  "description": "Cathodique OutputManager Subsystem",
+  "main": "index.js",
+  "interface": "@cathodique/output-manager-iface",
+  "priority": 12,
+  "capabilities": ["dom", "host"]
+}

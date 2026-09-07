@@ -1,347 +1,441 @@
 /**
- * Flexible Module Loader and Registry for Cathodique.
- * Manages SES Compartments, Endo ModuleSource evaluation, DOM capability granting, and interface instantiation.
+ * Core Dynamic Module Loader for Cathodique Desktop Environment.
+ * Implements one-way capability orchestration, isolated Compartments,
+ * manifest contract verification, and interface enforcement.
  */
 
-import { compileModuleSource, ensureLockdown } from "./ses-env.js";
+import $ from "informa";
 import { createModuleCompartment } from "./compartment.js";
 import { DomMembrane } from "./dom-membrane.js";
-import { defineInterface, getInterface, listInterfaces, validateModuleExports } from "./interface.js";
-import $ from "informa";
 import type {
-  InitModuleContext,
-  InterfaceDefinition,
-  ModuleInstance,
   ModuleLoaderApi,
   ModuleLoaderConfig,
   ModuleMetadata,
   ModuleRecord,
+  ModuleInstance,
+  InitModuleContext,
 } from "./types.js";
 
-export function normalizeScopedId(value: string, namespace = "@cathodique"): string {
-  if (!value || value.startsWith("@") || value.startsWith(".") || value.startsWith("/") || value.includes("://")) {
-    return value;
+export type PrivilegedRequire = (specifier: string) => any;
+
+function parseModuleSpecifier(specifier: string, defaultNamespace = "cathodique"): {
+  scope: string;
+  packageName: string;
+  subpath: string;
+} {
+  let clean = specifier.trim();
+  let subpath = ".";
+
+  if (clean.startsWith("@")) {
+    const slashIdx = clean.indexOf("/");
+    if (slashIdx === -1) throw new Error(`Invalid scoped module specifier: ${specifier}`);
+    const scope = clean.slice(1, slashIdx);
+    const rest = clean.slice(slashIdx + 1);
+    const subSlash = rest.indexOf("/");
+    if (subSlash === -1) {
+      return { scope, packageName: rest, subpath: "." };
+    }
+    return {
+      scope,
+      packageName: rest.slice(0, subSlash),
+      subpath: rest.slice(subSlash + 1),
+    };
   }
-  const root = namespace.startsWith("@") ? namespace : `@${namespace}`;
-  return `${root}/${value.replace(/^\/+/, "")}`;
+
+  if (clean.startsWith("modules/")) {
+    const parts = clean.replace(/^modules\//, "").split("/");
+    const scope = parts[0];
+    const packageName = parts[1] ?? "";
+    const sub = parts.slice(2).join("/");
+    return { scope, packageName, subpath: sub || "." };
+  }
+
+  const slashIdx = clean.indexOf("/");
+  if (slashIdx === -1) {
+    return { scope: defaultNamespace, packageName: clean, subpath: "." };
+  }
+  return {
+    scope: defaultNamespace,
+    packageName: clean.slice(0, slashIdx),
+    subpath: clean.slice(slashIdx + 1),
+  };
+}
+
+function normalizeScopedId(specifier: string, defaultNamespace = "cathodique"): string {
+  const { scope, packageName, subpath } = parseModuleSpecifier(specifier, defaultNamespace);
+  const base = `@${scope}/${packageName}`;
+  return subpath === "." ? base : `${base}/${subpath}`;
 }
 
 export class CathodiqueModuleLoader implements ModuleLoaderApi {
-  private config: ModuleLoaderConfig;
-  private namespace: string;
   private baseURL: string;
-  private cdnURL: string;
+  private namespace: string;
+  private config: ModuleLoaderConfig;
+  private membrane: DomMembrane;
 
-  private interfaces = new Map<string, InterfaceDefinition<any>>();
   private moduleRecords = new Map<string, ModuleRecord>();
   private moduleInstances = new Map<string, ModuleInstance<any>>();
-  private interfaceMappings = new Map<string, string>();
   private hostModules = new Map<string, any>();
-  private membrane: DomMembrane;
+  private initModuleLoaded = false;
 
   constructor(config: ModuleLoaderConfig = {}) {
     this.config = config;
-    this.namespace = config.namespace ?? "@cathodique";
-    this.baseURL = (config.baseURL ?? "").replace(/\/$/, "");
-    this.cdnURL = config.cdnURL ?? "https://esm.sh";
+    this.baseURL = (config.baseURL ?? "https://mods.cathodique.de").replace(/\/+$/, "");
+    this.namespace = config.namespace ?? "cathodique";
     this.membrane = DomMembrane.getInstance();
 
-    ensureLockdown();
-
-    // Register built-in host modules
-    this.hostModules.set("informa", { default: $, ...$ });
-
-    for (const iface of listInterfaces()) {
-      this.interfaces.set(iface.name, iface);
-    }
-
-    // Default built-in implementation mappings
-    const defaultMappings: Record<string, string> = {
-      "@cathodique/layer-iface": "@cathodique/layerloader",
-      "@cathodique/wm-iface": "@cathodique/sample-wm",
-      "@cathodique/service-iface": "@cathodique/sample-service",
-      "@cathodique/init-iface": "@cathodique/init",
-    };
-    for (const [k, v] of Object.entries(defaultMappings)) {
-      this.interfaceMappings.set(normalizeScopedId(k, this.namespace), normalizeScopedId(v, this.namespace));
-    }
-
-    if (config.interfaces) {
-      for (const [k, v] of Object.entries(config.interfaces)) {
-        this.interfaceMappings.set(normalizeScopedId(k, this.namespace), normalizeScopedId(v, this.namespace));
-      }
-    }
-
-    if (config.hostModules) {
-      for (const [k, v] of Object.entries(config.hostModules)) {
-        this.hostModules.set(k, v);
-      }
-    }
-  }
-
-  public registerInterface<T>(definition: InterfaceDefinition<T>): void {
-    const norm = normalizeScopedId(definition.name, this.namespace);
-    const def = { ...definition, name: norm };
-    defineInterface(def);
-    this.interfaces.set(norm, def);
-  }
-
-  public getInterface<T>(name: string): InterfaceDefinition<T> | undefined {
-    const norm = normalizeScopedId(name, this.namespace);
-    return (this.interfaces.get(norm) ?? getInterface(norm)) as InterfaceDefinition<T> | undefined;
-  }
-
-  public listRegisteredInterfaces(): InterfaceDefinition<any>[] {
-    return Array.from(this.interfaces.values());
+    this.registerHostModule("informa", $);
+    this.registerHostModule("@cathodique/informa", $);
   }
 
   public registerModule(record: ModuleRecord): void {
     const norm = normalizeScopedId(record.id, this.namespace);
-    this.moduleRecords.set(norm, { ...record, id: norm });
+    this.moduleRecords.set(norm, record);
   }
 
-  public registerHostModule(specifier: string, exportsNamespace: Record<string, unknown>): void {
-    this.hostModules.set(specifier, exportsNamespace);
+  public registerHostModule(moduleId: string, exports: any): void {
+    const norm = normalizeScopedId(moduleId, this.namespace);
+    this.hostModules.set(norm, exports);
+    this.hostModules.set(moduleId, exports);
+  }
+
+  public recordModule(
+    moduleId: string,
+    options: { manifest?: ModuleMetadata; sourceCode?: string; sourceUrl?: string }
+  ): void {
+    const norm = normalizeScopedId(moduleId, this.namespace);
+    this.moduleRecords.set(norm, {
+      id: norm,
+      sourceCode: options.sourceCode,
+      sourceUrl: options.sourceUrl,
+      metadata: options.manifest,
+    });
   }
 
   public async loadManifest(moduleId: string): Promise<ModuleMetadata | null> {
+    return this.fetchManifest(moduleId);
+  }
+
+  public async fetchManifest(moduleId: string): Promise<ModuleMetadata | null> {
     const norm = normalizeScopedId(moduleId, this.namespace);
-    let scope = "cathodique";
-    let name = norm;
-    if (norm.startsWith("@")) {
-      const parts = norm.slice(1).split("/");
-      scope = parts[0];
-      name = parts.slice(1).join("/");
-    }
+    const { scope, packageName } = parseModuleSpecifier(norm, this.namespace);
+
+    const recorded = this.moduleRecords.get(norm);
+    if (recorded?.metadata) return recorded.metadata;
 
     const candidateUrls = [
-      `${this.baseURL}/@${scope}/${name}/manifest.json`,
-      `${this.baseURL}/modules/${scope}/${name}/manifest.json`,
-      `${this.baseURL}/api/metadata/${norm}`,
-      `./modules/${scope}/${name}/manifest.json`,
+      `${this.baseURL}/@${scope}/${packageName}/manifest.json`,
+      `${this.baseURL}/modules/${scope}/${packageName}/manifest.json`,
+      `./modules/${scope}/${packageName}/manifest.json`,
     ];
 
     for (const url of candidateUrls) {
-      try {
-        const res = await fetch(url);
-        if (res.ok) return await res.json();
-      } catch {}
+      const res = await fetch(url).catch(() => null);
+      if (res && res.ok) {
+        const json = await res.json();
+        return json as ModuleMetadata;
+      }
     }
 
     if (typeof require !== "undefined") {
-      try {
-        const fs = require("node:fs");
-        const path = require("node:path");
-        const paths = [
-          path.resolve(process.cwd(), "dist/renderer/modules", scope, name, "manifest.json"),
-          path.resolve(process.cwd(), "src/renderer/modules", scope, name, "manifest.json"),
-        ];
-        for (const p of paths) {
-          if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf-8"));
-        }
-      } catch {}
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const paths = [
+        path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, "manifest.json"),
+        path.resolve(process.cwd(), "src/renderer/modules", scope, packageName, "manifest.json"),
+      ];
+      for (const p of paths) {
+        if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf-8"));
+      }
     }
 
     return null;
   }
 
-  public async loadInterface<T = unknown>(interfaceId: string): Promise<InterfaceDefinition<T>> {
-    const norm = normalizeScopedId(interfaceId, this.namespace);
-    if (this.interfaces.has(norm)) return this.interfaces.get(norm) as InterfaceDefinition<T>;
-
-    const manifest = await this.loadManifest(norm);
-    if (manifest?.exportMap) {
-      const def = defineInterface<T>({
-        name: norm,
-        type: "interface",
-        exportMap: manifest.exportMap,
-        description: manifest.description,
-        version: manifest.version,
-      });
-      this.registerInterface(def);
-      return def;
-    }
-
-    const mod = await this.loadModule<any>(norm);
-    const exp = mod.exports;
-    const def = (exp.default && typeof exp.default === "object" && "exportMap" in exp.default)
-      ? (exp.default as InterfaceDefinition<T>)
-      : defineInterface<T>({
-          name: norm,
-          exportMap: (exp.exportMap ?? {}) as any,
-        });
-
-    this.registerInterface(def);
-    return def;
+  public resolveModuleId(moduleId: string): string {
+    return normalizeScopedId(moduleId, this.namespace);
   }
 
-  public async discoverImplementingModules(interfaceName: string): Promise<ModuleMetadata[]> {
-    const norm = normalizeScopedId(interfaceName, this.namespace);
-    const results: ModuleMetadata[] = [];
+  public resolve<T = unknown>(moduleId: string): T | undefined {
+    const norm = normalizeScopedId(moduleId, this.namespace);
+    return this.moduleInstances.get(norm)?.instance as T | undefined;
+  }
 
-    // 1. In-memory records
-    for (const rec of this.moduleRecords.values()) {
-      if (rec.interfaceName === norm || rec.metadata?.interface === norm || rec.metadata?.interfaceName === norm) {
-        results.push({ id: rec.id, ...rec.metadata });
+  public getSubpathInterfaces(manifest: ModuleMetadata | null, subpath: string): string[] {
+    if (!manifest) return [];
+
+    const interfaces: string[] = [];
+
+    if (manifest.exports) {
+      const entry = manifest.exports[subpath] ?? (subpath === "." ? manifest.exports["."] : undefined);
+      if (entry && typeof entry === "object" && entry.implements) {
+        if (Array.isArray(entry.implements)) {
+          interfaces.push(...entry.implements);
+        } else if (typeof entry.implements === "string") {
+          interfaces.push(entry.implements);
+        }
       }
     }
 
-    // 2. Fetch catalog index
-    if (this.baseURL) {
-      try {
-        const res = await fetch(`${this.baseURL}/index.json`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.modules)) {
-            for (const mod of data.modules) {
-              if (mod.interface === norm || mod.interfaceName === norm || (Array.isArray(mod.implements) && mod.implements.includes(norm))) {
-                if (!results.some((r) => r.id === mod.id)) results.push(mod);
-              }
-            }
-          }
+    if (manifest.implements) {
+      if (typeof manifest.implements === "string") {
+        if (subpath === "." || interfaces.length === 0) interfaces.push(manifest.implements);
+      } else if (Array.isArray(manifest.implements)) {
+        if (subpath === "." || interfaces.length === 0) interfaces.push(...manifest.implements);
+      } else if (typeof manifest.implements === "object") {
+        const pathIface = manifest.implements[subpath] ?? (manifest.implements as any)[subpath.replace(/^\.\//, "")];
+        if (pathIface) {
+          if (Array.isArray(pathIface)) interfaces.push(...pathIface);
+          else interfaces.push(pathIface);
         }
-      } catch {}
+      }
     }
 
-    return results;
+    if (manifest.interface && interfaces.length === 0 && subpath === ".") {
+      interfaces.push(manifest.interface);
+    }
+
+    return interfaces;
   }
 
-  public resolveModuleId(interfaceName: string, preferredModuleId?: string): string {
-    const norm = normalizeScopedId(interfaceName, this.namespace);
-    if (preferredModuleId) return normalizeScopedId(preferredModuleId, this.namespace);
-    if (this.interfaceMappings.has(norm)) return this.interfaceMappings.get(norm)!;
-    return norm;
-  }
-
-  private async fetchSource(moduleId: string): Promise<{ code: string; url: string }> {
-    const recorded = this.moduleRecords.get(moduleId);
+  private async fetchSource(moduleId: string, manifest?: ModuleMetadata | null): Promise<{ code: string; url: string }> {
+    const norm = normalizeScopedId(moduleId, this.namespace);
+    const recorded = this.moduleRecords.get(norm);
     if (recorded?.sourceCode) {
-      return { code: recorded.sourceCode, url: recorded.sourceUrl ?? `${moduleId}.js` };
+      return { code: recorded.sourceCode, url: recorded.sourceUrl ?? `${norm}.js` };
     }
 
-    let scope = "cathodique";
-    let name = moduleId;
-    if (moduleId.startsWith("@")) {
-      const parts = moduleId.slice(1).split("/");
-      scope = parts[0];
-      name = parts.slice(1).join("/");
+    const { scope, packageName, subpath } = parseModuleSpecifier(norm, this.namespace);
+
+    let targetRelativeFile: string | undefined = undefined;
+    if (manifest?.exports && manifest.exports[subpath]) {
+      const entry = manifest.exports[subpath];
+      if (typeof entry === "string") targetRelativeFile = entry;
+      else if (typeof entry === "object" && entry.import) targetRelativeFile = entry.import;
     }
+
+    const fileBase = targetRelativeFile
+      ? targetRelativeFile.replace(/^\.\//, "")
+      : (subpath === "." ? "index.js" : `${subpath.replace(/^\.\//, "")}.js`);
 
     const candidateUrls = [
-      `${this.baseURL}/@${scope}/${name}.js`,
-      `${this.baseURL}/@${scope}/${name}`,
-      `${this.baseURL}/modules/${scope}/${name}/index.js`,
-      `${this.baseURL}/modules/${scope}/${name}.js`,
-      `./modules/${scope}/${name}/index.js`,
-      `./modules/${scope}/${name}.js`,
+      `${this.baseURL}/@${scope}/${packageName}/${fileBase}`,
+      `${this.baseURL}/modules/${scope}/${packageName}/${fileBase}`,
+      `./modules/${scope}/${packageName}/${fileBase}`,
+      `${this.baseURL}/@${scope}/${packageName}/${fileBase.replace(/\.js$/, "")}/index.js`,
+      `${this.baseURL}/modules/${scope}/${packageName}/${fileBase.replace(/\.js$/, "")}/index.js`,
     ];
 
     for (const url of candidateUrls) {
-      try {
-        const res = await fetch(url);
-        if (res.ok) return { code: await res.text(), url };
-      } catch {}
+      const res = await fetch(url).catch(() => null);
+      if (res && res.ok) return { code: await res.text(), url };
     }
 
     if (typeof require !== "undefined") {
-      try {
-        const fs = require("node:fs");
-        const path = require("node:path");
-        const paths = [
-          path.resolve(process.cwd(), "dist/renderer/modules", scope, name, "index.js"),
-          path.resolve(process.cwd(), "dist/renderer/modules", scope, `${name}.js`),
-          path.resolve(process.cwd(), "dist/renderer", `${name}.js`),
-        ];
-        for (const p of paths) {
-          if (fs.existsSync(p)) return { code: fs.readFileSync(p, "utf-8"), url: `file://${p}` };
-        }
-      } catch {}
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const relWithoutExt = fileBase.replace(/\.js$/, "");
+      const paths = [
+        path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, fileBase),
+        path.resolve(process.cwd(), "src/renderer/modules", scope, packageName, `${relWithoutExt}.ts`),
+        path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, relWithoutExt, "index.js"),
+        path.resolve(process.cwd(), "src/renderer/modules", scope, packageName, relWithoutExt, "index.ts"),
+        path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, "index.js"),
+        path.resolve(process.cwd(), "src/renderer/modules", scope, packageName, "index.ts"),
+      ];
+      for (const p of paths) {
+        if (fs.existsSync(p)) return { code: fs.readFileSync(p, "utf-8"), url: p };
+      }
     }
 
-    throw new Error(`Unable to fetch source for module '${moduleId}'.`);
+    throw new Error(`Module source not found for: ${norm} (subpath: ${subpath})`);
   }
 
-  public async loadModule<T = unknown>(
+  public loadModuleSync(moduleId: string, callerCaps: string[] = [], isCallerInit = false): Record<string, unknown> {
+    const norm = normalizeScopedId(moduleId, this.namespace);
+
+    // Capability security gate
+    if (norm === "@cathodique/dmabuf-client" || norm === "dmabuf-client") {
+      const hasDmabufCap = isCallerInit || callerCaps.some((c) => c === "dmabuf" || c === "cap-dmabuf" || c === "host");
+      if (!hasDmabufCap) {
+        throw new Error(`[Security / SES] Access denied: Module does not possess the 'dmabuf' capability required to require('${norm}').`);
+      }
+    }
+
+    if (this.moduleInstances.has(norm)) {
+      return this.moduleInstances.get(norm)!.exports;
+    }
+    if (this.hostModules.has(norm)) {
+      return this.hostModules.get(norm)!;
+    }
+
+    if (typeof require === "undefined") {
+      throw new Error(`Synchronous module loading not supported in browser environment without preloading: ${norm}`);
+    }
+
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const { scope, packageName, subpath } = parseModuleSpecifier(norm, this.namespace);
+    const subpathFile = subpath === "." ? "index.js" : `${subpath.replace(/^\.\//, "")}.js`;
+
+    const candidatePaths = [
+      path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, subpathFile),
+      path.resolve(process.cwd(), "dist/renderer/modules", scope, packageName, "index.js"),
+      path.resolve(process.cwd(), "src/renderer/modules", scope, packageName, "index.js"),
+    ];
+
+    let targetPath: string | undefined;
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        targetPath = p;
+        break;
+      }
+    }
+
+    if (!targetPath) {
+      return require(moduleId);
+    }
+
+    const code = fs.readFileSync(targetPath, "utf-8");
+    const moduleExports: Record<string, unknown> = {};
+    const moduleObj = { exports: moduleExports };
+
+    const isSubInit = norm.endsWith("/init");
+    const isSubInterface = norm.endsWith("-iface");
+
+    let manifestCaps: string[] = [];
+    const manifestPath = path.resolve(path.dirname(targetPath), "manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifestContent = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+        manifestCaps = manifestContent.capabilities ?? manifestContent.manifest?.capabilities ?? [];
+      } catch {}
+    }
+    const combinedCaps = Array.from(new Set([...callerCaps, ...manifestCaps]));
+
+    let proxiedDocument: Document | undefined = undefined;
+    let proxiedWindow: Window | undefined = undefined;
+
+    if (typeof document !== "undefined") {
+      proxiedDocument = this.membrane.createDocumentProxy(norm);
+    }
+    if (typeof window !== "undefined") {
+      proxiedWindow = this.membrane.wrap(window, "host", norm);
+    }
+
+    const reqFn = (spec: string) => this.loadModuleSync(spec, combinedCaps, isCallerInit);
+
+    const compartment = createModuleCompartment({
+      name: norm,
+      isInit: isSubInit,
+      isInterface: isSubInterface,
+      capabilities: combinedCaps,
+      endowments: {
+        require: reqFn,
+        exports: moduleExports,
+        module: moduleObj,
+        ...(proxiedDocument ? { document: proxiedDocument } : {}),
+        ...(proxiedWindow ? { window: proxiedWindow } : {}),
+        ...this.config.defaultEndowments,
+      },
+    });
+
+    const wrapped = `(function(exports, require, module, __filename, __dirname) {\n${code}\n})\n//# sourceURL=${targetPath}`;
+    const runner = compartment.evaluate(wrapped);
+    runner(moduleExports, reqFn, moduleObj, targetPath, path.dirname(targetPath));
+
+    const exportsNamespace = Object.keys(moduleObj.exports).length > 0 ? moduleObj.exports : moduleExports;
+
+    const instance: ModuleInstance<any> = {
+      id: norm,
+      compartment,
+      exports: exportsNamespace,
+      instance: (exportsNamespace.default ?? exportsNamespace),
+      proxiedDocument,
+    };
+
+    this.moduleInstances.set(norm, instance);
+    return exportsNamespace;
+  }
+
+  public async loadModule<T = Record<string, unknown>>(
     moduleId: string,
-    options: { isInit?: boolean; interfaceName?: string } = {}
+    capabilitiesOrOptions?: string[] | { isInit?: boolean; capabilities?: string[] }
   ): Promise<ModuleInstance<T>> {
     const norm = normalizeScopedId(moduleId, this.namespace);
+    const { subpath } = parseModuleSpecifier(norm, this.namespace);
+
     if (this.moduleInstances.has(norm)) {
       return this.moduleInstances.get(norm) as ModuleInstance<T>;
     }
 
-    // Check host module map
-    if (this.hostModules.has(norm)) {
-      const hostExports = this.hostModules.get(norm);
-      const compartment = createModuleCompartment({ name: norm, isInit: options.isInit });
-      const instance: ModuleInstance<T> = {
-        id: norm,
-        interfaceName: options.interfaceName,
-        compartment,
-        exports: hostExports,
-        instance: (hostExports.default ?? hostExports) as T,
-      };
-      this.moduleInstances.set(norm, instance);
-      return instance;
-    }
+    const manifest = await this.fetchManifest(norm);
+    const { code, url } = await this.fetchSource(norm, manifest);
 
-    const isInit = options.isInit ?? (norm === normalizeScopedId(this.config.initModule ?? "init", this.namespace));
-    const { code, url } = await this.fetchSource(norm);
-    const manifest = await this.loadManifest(norm);
+    const isInit = norm === "@cathodique/init" || norm.endsWith("/init");
+    const isInterface = norm.endsWith("-iface");
 
-    // Grant proxied document if module requests DOM capabilities
-    let proxiedDocument: Document | undefined = undefined;
-    const caps = manifest?.capabilities ?? [];
-    if (caps.includes("dom:export") || caps.includes("dom:render") || caps.includes("dom") || isInit) {
-      proxiedDocument = this.membrane.createDocumentProxy(norm);
-    }
+    const passedCaps = Array.isArray(capabilitiesOrOptions)
+      ? capabilitiesOrOptions
+      : (capabilitiesOrOptions?.capabilities ?? []);
+    const manifestCaps = (manifest as any)?.capabilities ?? (manifest as any)?.manifest?.capabilities ?? [];
+    const caps = Array.from(new Set([...passedCaps, ...manifestCaps]));
 
     const moduleExports: Record<string, unknown> = {};
     const moduleObj = { exports: moduleExports };
 
+    let proxiedDocument: Document | undefined = undefined;
+    let proxiedWindow: Window | undefined = undefined;
+
+    if (typeof document !== "undefined") {
+      proxiedDocument = this.membrane.createDocumentProxy(norm);
+    }
+    if (typeof window !== "undefined") {
+      proxiedWindow = this.membrane.wrap(window, "host", norm);
+    }
+
+    const privilegedRequire: PrivilegedRequire = (specifier: string) => {
+      const normSpec = normalizeScopedId(specifier, this.namespace);
+
+      if (normSpec === "@cathodique/dmabuf-client" || normSpec === "dmabuf-client") {
+        const hasDmabufCap = isInit || caps.some((c) => c === "dmabuf" || c === "cap-dmabuf" || c === "host");
+        if (!hasDmabufCap) {
+          throw new Error(`[Security / SES] Access denied: Module '${norm}' does not possess 'dmabuf' capability required to import '${specifier}'.`);
+        }
+      }
+
+      if (specifier === "informa") return $;
+      if (this.hostModules.has(specifier)) return this.hostModules.get(specifier);
+      if (this.hostModules.has(normSpec)) return this.hostModules.get(normSpec);
+
+      return this.loadModuleSync(normSpec, caps, isInit);
+    };
+
     const compartment = createModuleCompartment({
       name: norm,
       isInit,
+      isInterface,
+      capabilities: caps,
       endowments: {
         exports: moduleExports,
         module: moduleObj,
+        require: privilegedRequire,
         ...(proxiedDocument ? { document: proxiedDocument } : {}),
+        ...(proxiedWindow ? { window: proxiedWindow } : {}),
         ...this.config.defaultEndowments,
-      },
-      resolveHook: (specifier: string) => normalizeScopedId(specifier, this.namespace),
-      importHook: async (specifier: string) => {
-        const resolved = normalizeScopedId(specifier, this.namespace);
-        if (this.hostModules.has(resolved)) {
-          return { namespace: this.hostModules.get(resolved) } as any;
-        }
-        const src = await this.fetchSource(resolved);
-        return await compileModuleSource(src.code, src.url, `${this.cdnURL}/@endo/module-source`);
       },
     });
 
-    let exportsNamespace: Record<string, unknown> = {};
-    try {
-      compartment.evaluate(code);
-      exportsNamespace = Object.keys(moduleObj.exports).length > 0 ? moduleObj.exports : moduleExports;
-    } catch (err: any) {
-      throw new Error(`Failed evaluating module '${norm}': ${err?.message ?? err}`);
-    }
+    const wrapped = `(function(exports, require, module) {\n${code}\n})\n//# sourceURL=${url}`;
+    const runner = compartment.evaluate(wrapped);
+    runner(moduleExports, privilegedRequire, moduleObj);
 
-    // Validate interface contract
-    const targetIface = options.interfaceName ?? (manifest?.interface ? normalizeScopedId(manifest.interface, this.namespace) : undefined);
-    if (targetIface) {
-      const iface = this.getInterface(targetIface);
-      if (iface) {
-        const val = validateModuleExports(exportsNamespace, iface);
-        if (!val.valid) {
-          throw new Error(`Module '${norm}' fails contract for '${targetIface}': ${val.errors.join(", ")}`);
-        }
-      }
-    }
+    const exportsNamespace = Object.keys(moduleObj.exports).length > 0 ? moduleObj.exports : moduleExports;
+    const subpathIfaces = this.getSubpathInterfaces(manifest, subpath);
 
     const instance: ModuleInstance<T> = {
       id: norm,
-      interfaceName: targetIface,
+      interfaceName: subpathIfaces[0],
       compartment,
       exports: exportsNamespace,
       instance: (exportsNamespace.default ?? exportsNamespace) as T,
@@ -353,63 +447,84 @@ export class CathodiqueModuleLoader implements ModuleLoaderApi {
     return instance;
   }
 
-  public async spawn<T = unknown>(interfaceName: string, moduleId?: string): Promise<T> {
-    const normIface = normalizeScopedId(interfaceName, this.namespace);
-    const targetMod = moduleId ? normalizeScopedId(moduleId, this.namespace) : this.resolveModuleId(normIface);
-    const cacheKey = `${normIface}::${targetMod}`;
+  public async spawn<T = unknown>(moduleId: string, ...args: any[]): Promise<T> {
+    const norm = normalizeScopedId(moduleId, this.namespace);
 
-    if (this.moduleInstances.has(cacheKey)) {
-      return this.moduleInstances.get(cacheKey)!.instance as T;
+    const mod = await this.loadModule<any>(norm);
+    const exports = mod.exports;
+
+    let target: any = exports.default ?? exports;
+
+    if (target && typeof target === "object") {
+      const keys = Object.keys(target);
+      if (keys.length === 1 && typeof target[keys[0]] === "function") {
+        target = target[keys[0]];
+      }
     }
 
-    const handle = await this.loadModule<T>(targetMod, { interfaceName: normIface });
-    let inst: any = handle.instance;
+    if (typeof target === "function") {
+      const isConstructor = Boolean(
+        target.prototype && (Object.getOwnPropertyNames(target.prototype).length > 1 || target.prototype.constructor)
+      );
 
-    if (typeof handle.exports.default === "function" && (handle.exports.default as any).prototype?.constructor === handle.exports.default) {
-      const Cls = handle.exports.default as new () => T;
-      inst = new Cls();
-    } else if (typeof handle.exports.create === "function") {
-      inst = (handle.exports.create as Function)();
+      let created: any;
+      if (isConstructor) {
+        try {
+          created = new target(...args);
+        } catch {
+          created = target(...args);
+        }
+      } else {
+        created = target(...args);
+      }
+
+      mod.instance = created;
+      this.moduleInstances.set(norm, mod);
+      return created as T;
     }
 
-    handle.instance = inst;
-    this.moduleInstances.set(cacheKey, handle);
-    this.moduleInstances.set(normIface, handle);
-    return inst as T;
+    return target as T;
   }
 
-  public resolve<T = unknown>(interfaceName: string): T | undefined {
-    const norm = normalizeScopedId(interfaceName, this.namespace);
-    return (this.moduleInstances.get(norm)?.instance ?? this.moduleInstances.get(this.resolveModuleId(norm))?.instance) as T | undefined;
-  }
+  public async startInitModule(initModule: ModuleInstance<any>, ctx: InitModuleContext): Promise<unknown> {
+    const exports = initModule.exports;
+    const initFn = (exports as any).init ?? (exports as any).default?.init ?? (exports as any).default;
 
-  public async bootstrapInit(initModuleId = "init"): Promise<unknown> {
-    const norm = normalizeScopedId(initModuleId, this.namespace);
-
-    let iframeElement: HTMLIFrameElement | undefined = undefined;
-    if (typeof document !== "undefined") {
-      iframeElement = (document.querySelector("iframe") as HTMLIFrameElement) ?? undefined;
+    if (typeof initFn !== "function") {
+      throw new Error(`Init module '${initModule.id}' does not export an 'init' function.`);
     }
 
-    const initHandle = await this.loadModule<any>(norm, { isInit: true, interfaceName: "@cathodique/init-iface" });
-    const initFn = typeof initHandle.exports.init === "function"
-      ? initHandle.exports.init
-      : typeof initHandle.exports.default === "function"
-      ? initHandle.exports.default
-      : null;
+    return await initFn(ctx);
+  }
 
-    if (!initFn) throw new Error(`Init module '${norm}' must export an 'init' function.`);
+  public async bootstrapInit(
+    initModuleId: string = "@cathodique/init",
+    ctx: Partial<InitModuleContext> = {}
+  ): Promise<unknown> {
+    if (this.initModuleLoaded) {
+      throw new Error("Init module already loaded. Re-bootstrapping PID 1 is forbidden.");
+    }
+    this.initModuleLoaded = true;
 
-    const context: InitModuleContext = {
-      globalThis: globalThis,
-      require: typeof require !== "undefined" ? require : undefined,
+    const normInitId = normalizeScopedId(initModuleId, this.namespace);
+    const initModule = await this.loadModule<any>(normInitId, ["init", "host", "dmabuf"]);
+
+    const fullCtx: InitModuleContext = {
+      globalThis,
+      loader: this,
+      membrane: this.membrane,
       $: $,
       config: this.config,
-      loader: this,
-      iframeElement,
-      membrane: this.membrane,
+      iframeElement: ctx.iframeElement,
+      require: typeof require !== "undefined" ? require : undefined,
+      DmabufBridgeClient: ctx.DmabufBridgeClient,
+      ...ctx,
     };
 
-    return await initFn(context);
+    return await this.startInitModule(initModule, fullCtx);
   }
+}
+
+export function createCathodiqueLoader(config?: ModuleLoaderConfig): CathodiqueModuleLoader {
+  return new CathodiqueModuleLoader(config);
 }

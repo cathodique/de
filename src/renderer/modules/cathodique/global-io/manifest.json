@@ -1,0 +1,10 @@
+{
+  "id": "@cathodique/global-io",
+  "name": "global-io",
+  "version": "1.0.0",
+  "description": "Cathodique Global I/O and Modifier Tracking Subsystem",
+  "main": "index.js",
+  "interface": "@cathodique/global-io-iface",
+  "priority": 15,
+  "capabilities": ["dom", "dom:document", "dom:window", "host"]
+}

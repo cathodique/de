@@ -4,10 +4,11 @@
 
 import { CathodiqueModuleLoader } from "./core/loader.js";
 import { ensureLockdown } from "./core/ses-env.js";
-import type { ModuleLoaderConfig } from "./core/types.js";
+import type { ModuleLoaderConfig, InitModuleContext } from "./core/types.js";
+import { DmabufBridgeClient } from "./dmabuf-client.js";
 import $ from "informa";
 
-export { $ };
+export { $, DmabufBridgeClient };
 export * from "./core/types.js";
 export * from "./core/window.js";
 export * from "./core/ses-env.js";
@@ -29,35 +30,44 @@ export class Cathodique {
     this.loader = new CathodiqueModuleLoader(this.config);
   }
 
-  public async init(initModuleId = "@cathodique/init"): Promise<unknown> {
+  public async init(initModuleId: string = "@cathodique/init", ctx?: Partial<InitModuleContext>): Promise<unknown> {
     console.log("[Cathodique] Bootstrapping Desktop Environment...");
-    return await this.loader.bootstrapInit(initModuleId);
+    return await this.loader.bootstrapInit(initModuleId, {
+      DmabufBridgeClient,
+      ...ctx,
+    });
   }
 
-  public async spawn<T>(interfaceName: string, moduleId?: string): Promise<T> {
-    return await this.loader.spawn<T>(interfaceName, moduleId);
+  public async spawn<T>(moduleId: string, ...args: any[]): Promise<T> {
+    return await this.loader.spawn<T>(moduleId, ...args);
   }
 
-  public resolve<T>(interfaceName: string): T | undefined {
-    return this.loader.resolve<T>(interfaceName);
+  public resolve<T>(moduleId: string): T | undefined {
+    return this.loader.resolve<T>(moduleId);
   }
 }
 
-if (typeof window !== "undefined") {
-  (window as any).Cathodique = Cathodique;
-  (window as any).$ = $;
+(window as any).Cathodique = Cathodique;
+(window as any).$ = $;
 
-  const runtime = new Cathodique({
-    baseURL: "https://mods.cathodique.de",
-    interfaces: {
-      "@cathodique/layer-iface": "@cathodique/layerloader",
-      "@cathodique/wm-iface": "@cathodique/sample-wm",
-      "@cathodique/service-iface": "@cathodique/sample-service",
-    },
+const runtime = new Cathodique({
+  baseURL: "https://mods.cathodique.de",
+});
+
+(window as any).cathodiqueRuntime = runtime;
+
+async function bootstrap() {
+  let iframe = document.querySelector("iframe") as HTMLIFrameElement | null;
+  if (!iframe && document.readyState === "loading") {
+    await new Promise((resolve) => window.addEventListener("DOMContentLoaded", resolve, { once: true }));
+    iframe = document.querySelector("iframe") as HTMLIFrameElement | null;
+  }
+  await runtime.init("@cathodique/init", {
+    iframeElement: iframe ?? undefined,
+    DmabufBridgeClient,
   });
-
-  (window as any).cathodiqueRuntime = runtime;
-  runtime.init("@cathodique/init").catch(console.error);
 }
+
+bootstrap().catch(console.error);
 
 export default Cathodique;

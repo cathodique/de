@@ -1,232 +1,246 @@
 /**
  * Cathodique Privileged Init Module (PID 1 of Desktop Environment).
  * Orchestrates iframe viewport, Wayland compositor, and system subsystems.
- * Bridges Wayland toplevel surfaces into Informa-statified AbstractWindow instances.
+ * Bridges Wayland toplevel surfaces into CathodiqueWindow instances for Window Managers.
  */
 
 import $ from "informa";
 import type { InitModuleContext } from "../../../core/types.js";
-import { AbstractWindow, type WindowGeometry } from "../../../core/window.js";
-
-/**
- * Concrete AbstractWindow adapter bridging a Wayland XdgToplevel to the Window Manager.
- * Changes to title, geometry, and status reactively notify the Window Manager via Informa.
- */
-export class WaylandToplevelWindow extends AbstractWindow {
-  public readonly id: string;
-  private toplevel: any;
-  private seats?: any;
-  private destroyListeners = new Set<() => void>();
-
-  constructor(toplevel: any, seats?: any) {
-    super();
-    this.toplevel = toplevel;
-    this.seats = seats;
-    this.id = `wayland-${toplevel.oid}`;
-    this.title = toplevel.title ?? "Wayland Window";
-    this.appId = toplevel.appId;
-
-    // wl-serv-high BaseObject is statified with Informa: sync title and appId reactively
-    $.onSet(() => toplevel.title, (newTitle: string) => {
-      if (typeof newTitle === "string") this.title = newTitle;
-    });
-    $.onSet(() => toplevel.appId, (newAppId: string) => {
-      if (typeof newAppId === "string") this.appId = newAppId;
-    });
-
-    // Also listen for Wayland protocol destroy events
-    if (typeof toplevel.on === "function") {
-      toplevel.on("destroy", () => {
-        for (const cb of this.destroyListeners) {
-          try { cb(); } catch { }
-        }
-      });
-    }
-  }
-
-  public close(): void {
-    if (typeof this.toplevel.addCommand === "function") {
-      this.toplevel.addCommand("close", {});
-    } else if (typeof this.toplevel.wlDestroy === "function") {
-      this.toplevel.wlDestroy();
-    }
-  }
-
-  public focus(): void {
-    this.activated = true;
-    if (this.toplevel.parent?.surface && this.seats) {
-      for (const seatAuth of this.seats.values()) {
-        const instances = seatAuth.get(this.toplevel.connection);
-        if (instances && typeof instances.focus === "function") {
-          instances.focus(this.toplevel.parent.surface, []);
-        }
-      }
-    }
-  }
-
-  public configure(bounds: Partial<WindowGeometry>): void {
-    if (bounds) {
-      this.geometry = { ...this.geometry, ...bounds };
-    }
-    if (typeof this.toplevel.configureSequence === "function") {
-      this.toplevel.configureSequence(true, false);
-    }
-  }
-
-  public onDestroy(callback: () => void): () => void {
-    this.destroyListeners.add(callback);
-    return () => this.destroyListeners.delete(callback);
-  }
-}
+import type { CathodiqueWindow } from "@cathodique/window-iface";
+import type { OutputManager } from "@cathodique/output-manager-iface";
+import type { LayerLoader } from "@cathodique/layer-iface";
+import type { WindowManager } from "@cathodique/wm-iface";
+import type { Service } from "@cathodique/service-iface";
+import type { HLCompositor, HLConnection } from "@cathodique/wl-serv-high";
+import type { OutputRegistry, SeatRegistry, StrutRegistry } from "@cathodique/wl-serv-high/registries";
+import type { XdgToplevel, WlBuffer } from "@cathodique/wl-serv-high/objects";
+import type { WlBufferExtended } from "../window/index.js";
 
 export async function init(context: InitModuleContext) {
-  const { loader, membrane, iframeElement, require: hostRequire } = context;
+  const { loader, membrane, iframeElement, require: hostRequire, DmabufBridgeClient } = context;
   console.log("[Init / PID 1] Bootstrapping Cathodique Desktop Environment...");
 
-  let iframeViewport: { document: Document; root: HTMLElement } | undefined;
-  if (iframeElement) {
-    try {
-      iframeViewport = membrane.initScriptlessIframe(iframeElement);
-      console.log("[Init] Scriptless iframe viewport initialized.");
-    } catch (e) {
-      console.warn("[Init] Viewport initialization note:", e);
+  const targetIframe = iframeElement ?? document.querySelector("iframe")!;
+  const iframeViewport = membrane.initScriptlessIframe(targetIframe);
+  console.log("[Init] Scriptless iframe viewport initialized successfully.");
+
+  // Subsystems loaded dynamically via loader contracts
+  const windowMod = await loader.loadModule<{
+    CathodiqueWindow: new (toplevel: XdgToplevel, seats?: SeatRegistry) => CathodiqueWindow;
+  }>("@cathodique/window");
+  const WindowCtor = (windowMod.exports.CathodiqueWindow ?? windowMod.exports.default) as new (
+    toplevel: XdgToplevel,
+    seats?: SeatRegistry
+  ) => CathodiqueWindow;
+
+  const outputManagerMod = await loader.loadModule<{
+    OutputManager: new (registry?: OutputRegistry) => OutputManager;
+  }>("@cathodique/output-manager");
+  const OutputManagerCtor = (outputManagerMod.exports.OutputManager ?? outputManagerMod.exports.default) as new (
+    registry?: OutputRegistry
+  ) => OutputManager;
+
+  const subsystems = new Map<string, unknown>();
+  let compositor: HLCompositor | undefined = undefined;
+  let activeSeats: SeatRegistry | undefined = undefined;
+  let activeWindowManager: WindowManager | undefined = undefined;
+  let rafId: number | undefined = undefined;
+
+  // 1. One-Way Hierarchical Subsystem Orchestration
+  // 1a. Spawn Layer Loader Subsystem (loads & creates all standard layers on construction)
+  const layerloader = await loader.spawn<LayerLoader>("@cathodique/layerloader");
+  subsystems.set("@cathodique/layerloader", layerloader);
+
+  const layersRoot = layerloader.getRootElement();
+  if (layersRoot) {
+    const unwrappedRoot = membrane.unwrapNode(layersRoot) as HTMLElement;
+    iframeViewport.root.appendChild(unwrappedRoot);
+    console.log("[Init] Mounted LayerLoader root to iframe viewport.");
+  }
+
+  // 1b. Spawn Window Manager Subsystem
+  const wm = await loader.spawn<WindowManager>("@cathodique/sample-wm");
+  subsystems.set("@cathodique/sample-wm", wm);
+  activeWindowManager = wm;
+
+  if (wm && typeof wm.getWorkspaceElement === "function") {
+    const wsElement = wm.getWorkspaceElement();
+    if (wsElement) {
+      const unwrappedWs = membrane.unwrapNode(wsElement) as HTMLElement;
+      layerloader.attachToLayer("desktop-workspace", unwrappedWs);
+      console.log("[Init] Attached Sample WM workspace to 'desktop-workspace' layer.");
     }
   }
 
-  const subsystems = new Map<string, any>();
-  let compositor: any = undefined;
-  let activeSeats: any = undefined;
-  let activeWindowManager: any = undefined;
+  // 1c. Spawn Sample Background Service
+  const service = await loader.spawn<Service>("@cathodique/sample-service");
+  subsystems.set("@cathodique/sample-service", service);
+  if (service && typeof service.start === "function") {
+    await service.start();
+  }
 
-  // 1. Wayland Compositor Subsystem
+  // 2. Wayland Compositor Subsystem
   const req = hostRequire ?? (typeof require !== "undefined" ? require : null);
 
   if (req) {
-    try {
-      const { HLCompositor } = req("@cathodique/wl-serv-high");
-      const { OutputRegistry, SeatRegistry, StrutRegistry } = req("@cathodique/wl-serv-high/registries");
+    const { HLCompositor: HLCompClass } = req("@cathodique/wl-serv-high") as {
+      HLCompositor: typeof HLCompositor;
+    };
+    const { OutputRegistry: OutRegClass, SeatRegistry: SeatRegClass, StrutRegistry: StrutRegClass } = req(
+      "@cathodique/wl-serv-high/registries"
+    ) as {
+      OutputRegistry: typeof OutputRegistry;
+      SeatRegistry: typeof SeatRegistry;
+      StrutRegistry: typeof StrutRegistry;
+    };
 
-      if (HLCompositor && OutputRegistry && SeatRegistry && StrutRegistry) {
-        const outputs = new OutputRegistry();
-        outputs.addAuthority({
-          x: 0,
-          y: 0,
-          w: 1920,
-          h: 1080,
-          effectiveW: 1920,
-          effectiveH: 1080,
-        });
+    if (HLCompClass && OutRegClass && SeatRegClass && StrutRegClass) {
+      const outputs = new OutRegClass();
+      outputs.addAuthority({
+        x: 0,
+        y: 0,
+        w: 1920,
+        h: 1080,
+        effectiveW: 1920,
+        effectiveH: 1080,
+      });
 
-        const seats = new SeatRegistry();
-        seats.addAuthority({
-          name: "default",
-          capabilities: 7, // keyboard | pointer | touch
-        });
-        activeSeats = seats;
+      const outputManager = new OutputManagerCtor(outputs);
+      subsystems.set("@cathodique/output-manager", outputManager);
 
-        const struts = new StrutRegistry();
+      const outputsRoot = outputManager.getRootElement();
+      if (outputsRoot) {
+        const unwrappedOutputs = membrane.unwrapNode(outputsRoot) as HTMLElement;
+        layerloader.attachToLayer("desktop-workspace", unwrappedOutputs);
+      }
 
-        compositor = new HLCompositor({
-          wl_registry: { outputs, seats, struts },
-        });
+      const seats = new SeatRegClass();
+      seats.addAuthority({
+        name: "default",
+        capabilities: 7, // keyboard | pointer | touch
+      });
+      activeSeats = seats;
 
-        // Adapt raw xdg_toplevel to AbstractWindow and pass to Window Manager
-        compositor.on("connection", (conn: any) => {
-          conn.on("new_obj", (obj: any) => {
-            if (obj.iface === "xdg_toplevel") {
-              console.log(`[Init / Wayland] New xdg_toplevel registered (oid: ${obj.oid})`);
-              const wm = activeWindowManager ?? subsystems.get("@cathodique/wm-iface");
-              if (wm) {
-                const windowModel = new WaylandToplevelWindow(obj, activeSeats);
-                if (typeof wm.manageWindow === "function") {
-                  wm.manageWindow(windowModel);
-                } else if (typeof wm.createWindow === "function") {
-                  wm.createWindow(windowModel);
-                }
+      const struts = new StrutRegClass();
+
+      compositor = new HLCompClass({
+        wl_registry: { outputs, seats, struts },
+      });
+
+      // Initialize DMA-BUF bridge client if host provided it and electron IPC is available
+      const electronMod = req("electron");
+      let dmabufBridgeClient: any = null;
+      if (electronMod?.ipcRenderer && DmabufBridgeClient) {
+        const socketPath = (await electronMod.ipcRenderer.invoke("getDmabufBridgeSocketPath")) as string;
+        if (socketPath) {
+          dmabufBridgeClient = new DmabufBridgeClient(electronMod.sharedTexture);
+          await dmabufBridgeClient.connect(socketPath);
+          console.log(`[Init / Wayland] Connected to DMA-BUF bridge at ${socketPath}`);
+        }
+      }
+
+      // Bridge raw xdg_toplevel to CathodiqueWindow instances for Window Managers
+      compositor.on("connection", (conn: HLConnection) => {
+        conn.on("new_obj", (obj: { iface: string; oid: number; [key: string]: unknown }) => {
+          if (obj.iface === "wl_buffer") {
+            const buf = obj as unknown as WlBufferExtended;
+            const isDmabuf = (buf as { isDmabuf?: boolean }).isDmabuf === true ||
+              !!(buf.meta as { planes?: unknown[] } | undefined)?.planes ||
+              !!buf.dmabufMeta?.planes;
+            if (isDmabuf) {
+              console.log(`[Init / Wayland] New dmabuf wl_buffer registered (oid: ${obj.oid})`);
+              if (dmabufBridgeClient) {
+                dmabufBridgeClient.importBuffer(buf);
               }
             }
-          });
-        });
+          } else if (obj.iface === "xdg_toplevel") {
+            const toplevel = obj as unknown as XdgToplevel;
+            console.log(`[Init / Wayland] New xdg_toplevel registered (oid: ${toplevel.oid})`);
+            const targetWm = activeWindowManager ?? (subsystems.get("@cathodique/sample-wm") as WindowManager);
+            if (targetWm) {
+              // Window manager receives the strictly typed CathodiqueWindow
+              const windowModel = new WindowCtor(toplevel, activeSeats);
 
-        await compositor.start();
-        console.log(`[Init / Wayland] Compositor started at socket: ${compositor.params?.socketPath}`);
+              // Track window intersections with all registered outputs
+              outputManager.trackWindow(windowModel);
 
-        // Register socket for deletion on exit
-        try {
-          const { ipcRenderer } = req("electron");
-          if (ipcRenderer && compositor.params?.socketPath) {
-            ipcRenderer.send("addToDeleteQueue", compositor.params.socketPath);
-            ipcRenderer.send("addToDeleteQueue", `${compositor.params.socketPath}.lock`);
+              if (typeof targetWm.manageWindow === "function") {
+                targetWm.manageWindow(windowModel);
+              }
+            }
           }
-        } catch { }
+        });
+      });
+
+      await compositor.start();
+      const displaySocket = compositor.params?.socketPath ?? "wayland-0";
+      console.log(`[Init / Wayland] Compositor started on socket: ${displaySocket}`);
+
+      // Register allocated socket with Main process delete queue for reliable exit cleanup
+      if (electronMod?.ipcRenderer && displaySocket) {
+        electronMod.ipcRenderer.send("addToDeleteQueue", displaySocket);
+        electronMod.ipcRenderer.send("addToDeleteQueue", `${displaySocket}.lock`);
       }
-    } catch (err) {
-      console.warn("[Init / Wayland] Compositor startup note:", err);
     }
   }
 
-  // 2. Subsystem Orchestration
-  try {
-    // 2a. Layer Loader Subsystem
-    const layerloader = await loader.spawn<any>("@cathodique/layer-iface", "@cathodique/layerloader");
-    subsystems.set("@cathodique/layer-iface", layerloader);
+  // 3. Reactivity Animation Frame Loop (Informa stats + window sync + Wayland tick authority)
+  const renderLoop = () => {
+    // Drive Wayland compositor frame callbacks on every display refresh tick
+    if (compositor?.ticks) {
+      compositor.ticks.emit("tick");
+    }
 
-    if (layerloader && typeof layerloader.createLayer === "function") {
-      const defaultLayers = [
-        { name: "background", z: 0 },
-        { name: "desktop-workspace", z: 100 },
-        { name: "windows", z: 500 },
-        { name: "overlays-panel", z: 1000 },
-        { name: "lockscreen", z: 9999 },
-      ];
+    if (activeWindowManager && typeof (activeWindowManager as any).getManagedWindows === "function") {
+      const managed = (activeWindowManager as any).getManagedWindows();
+      for (const mw of managed) {
+        if (mw.hostElement && mw.window?.geometry) {
+          const geo = mw.window.geometry;
+          if (geo.width > 0 && geo.height > 0) {
+            const curLeft = `${geo.x}px`;
+            const curTop = `${geo.y}px`;
+            const curWidth = `${geo.width}px`;
+            const curHeight = `${geo.height}px`;
 
-      for (const conf of defaultLayers) {
-        const layer = layerloader.createLayer(conf.name, conf.z);
-        if (layer.hostElement && iframeViewport) {
-          iframeViewport.root.appendChild(membrane.unwrapNode(layer.hostElement) as HTMLElement);
+            if (mw.hostElement.style.left !== curLeft) mw.hostElement.style.left = curLeft;
+            if (mw.hostElement.style.top !== curTop) mw.hostElement.style.top = curTop;
+            if (mw.hostElement.style.width !== curWidth) mw.hostElement.style.width = curWidth;
+            if (mw.hostElement.style.height !== curHeight) mw.hostElement.style.height = curHeight;
+          }
         }
       }
     }
 
-    // 2b. Window Manager Subsystem
-    const wm = await loader.spawn<any>("@cathodique/wm-iface", "@cathodique/sample-wm");
-    subsystems.set("@cathodique/wm-iface", wm);
-    activeWindowManager = wm;
+    rafId = requestAnimationFrame(renderLoop);
+  };
 
-    if (wm && typeof wm.getWorkspaceElement === "function") {
-      const workspace = wm.getWorkspaceElement();
-      if (workspace) {
-        const windowsLayer = layerloader?.getLayer?.("windows")?.hostElement;
-        const targetParent = windowsLayer ? membrane.unwrapNode(windowsLayer) as HTMLElement : iframeViewport?.root;
-        if (targetParent) {
-          targetParent.appendChild(membrane.unwrapNode(workspace) as HTMLElement);
-        }
+  rafId = requestAnimationFrame(renderLoop);
+
+  const cleanupCompositor = () => {
+    if (rafId !== undefined) cancelAnimationFrame(rafId);
+    if (compositor) {
+      compositor.close();
+      const sockPath = compositor.params?.socketPath;
+      if (sockPath && req) {
+        try {
+          (req("node:fs") as typeof import("node:fs")).rmSync(sockPath, { force: true });
+        } catch {}
+        try {
+          (req("node:fs") as typeof import("node:fs")).rmSync(`${sockPath}.lock`, { force: true });
+        } catch {}
       }
     }
+  };
 
-    // 2c. Service Subsystem
-    const service = await loader.spawn<any>("@cathodique/service-iface", "@cathodique/sample-service");
-    subsystems.set("@cathodique/service-iface", service);
-    if (service && typeof service.start === "function") {
-      await service.start();
-    }
-  } catch (err) {
-    console.warn("[Init] Subsystem spawn note:", err);
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", cleanupCompositor);
+    window.addEventListener("unload", cleanupCompositor);
   }
-
-  console.log(`[Init / PID 1] Desktop Environment Ready.`);
 
   return {
-    loader,
-    compositor,
     subsystems,
-    iframeViewport,
-    shutdown: async () => {
-      for (const sub of subsystems.values()) {
-        if (typeof sub?.stop === "function") await sub.stop();
-      }
-      if (compositor?.destroy) compositor.destroy();
-    },
+    compositor,
+    destroy: cleanupCompositor,
   };
 }
 

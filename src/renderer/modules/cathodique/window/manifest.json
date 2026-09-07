@@ -1,0 +1,10 @@
+{
+  "id": "@cathodique/window",
+  "name": "window",
+  "version": "1.0.0",
+  "description": "Default Wayland Window Adapter for Cathodique DE",
+  "main": "index.js",
+  "interface": "@cathodique/window-iface",
+  "priority": 20,
+  "capabilities": ["host", "dom", "system", "wayland"]
+}

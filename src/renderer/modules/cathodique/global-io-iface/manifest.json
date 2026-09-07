@@ -1,0 +1,6 @@
+{
+  "name": "@cathodique/global-io-iface",
+  "version": "1.0.0",
+  "isInterface": true,
+  "capabilities": []
+}

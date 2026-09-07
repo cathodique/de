@@ -1,63 +1,64 @@
 /**
- * Reference Window Manager Module for Cathodique.
- * Manages AbstractWindow instances using Informa reactive state and pure DOM UI.
+ * Cathodique Sample Window Manager Module (@cathodique/sample-wm).
+ * Manages windows in the "desktop-workspace" layer.
+ * Implements @cathodique/wm-iface.
  */
 
 import $ from "informa";
-import { AbstractWindow, type WindowGeometry } from "../../../core/window.js";
+import { AbstractWindow, type WindowGeometry } from "@cathodique/window-iface";
+import { IS_COMPONENT } from "@cathodique/init-iface";
+import type { WindowManager as IWindowManager, ManagedWindow } from "@cathodique/wm-iface";
+import { trackMouseRelease } from "@cathodique/global-io";
 
-export interface ManagedWindow {
-  id: string;
-  window: AbstractWindow;
-  hostElement?: HTMLElement;
-  zIndex: number;
-}
+export { ManagedWindow };
 
-const managedWindows = new Map<string, ManagedWindow>();
-let nextWindowId = 1;
-let currentBaseZIndex = 100;
-let workspaceElement: HTMLElement | undefined = undefined;
+let nextGenericWinId = 1;
 
-export function getWorkspaceElement(): HTMLElement | undefined {
-  if (workspaceElement) return workspaceElement;
-  if (typeof document !== "undefined") {
-    try {
-      workspaceElement = document.createElement("div");
-      workspaceElement.className = "wm-workspace";
-      workspaceElement.style.position = "absolute";
-      workspaceElement.style.inset = "0";
-      workspaceElement.style.width = "100%";
-      workspaceElement.style.height = "100%";
-      workspaceElement.style.pointerEvents = "none";
-    } catch {}
-  }
-  return workspaceElement;
-}
-
-/**
- * Generic in-memory implementation of AbstractWindow for pure DOM/Web windows.
- */
 export class GenericDesktopWindow extends AbstractWindow {
   public readonly id: string;
   private destroyListeners = new Set<() => void>();
+  private contentElement: HTMLElement;
 
   constructor(title = "Desktop Window", geometry?: Partial<WindowGeometry>) {
     super();
-    this.id = `win-${nextWindowId++}`;
+    this.id = `win-${nextGenericWinId++}`;
     this.title = title;
-    if (geometry) {
-      this.geometry = { ...this.geometry, ...geometry };
-    }
+    this.geometry = {
+      x: 120,
+      y: 100,
+      width: 640,
+      height: 420,
+      ...geometry,
+    };
+
+    this.contentElement = document.createElement("div");
+    this.contentElement.style.width = "100%";
+    this.contentElement.style.height = "100%";
+    this.contentElement.style.padding = "20px";
+    this.contentElement.style.color = "#ddd";
+    this.contentElement.style.fontFamily = "system-ui, -apple-system, sans-serif";
+    this.contentElement.innerHTML = `
+      <h3 style="margin-top:0; color:#fff;">${title}</h3>
+      <p>Cathodique Modular Desktop Environment is running in an isolated SES compartment.</p>
+    `;
+  }
+
+  public getSurfaceElement(): HTMLElement {
+    return this.contentElement;
   }
 
   public close(): void {
     for (const cb of this.destroyListeners) {
-      try { cb(); } catch {}
+      cb();
     }
   }
 
   public focus(): void {
     this.activated = true;
+  }
+
+  public blur(): void {
+    this.activated = false;
   }
 
   public configure(bounds: Partial<WindowGeometry>): void {
@@ -70,199 +71,189 @@ export class GenericDesktopWindow extends AbstractWindow {
   }
 }
 
-/**
- * Manages an AbstractWindow instance (Wayland surface, DOM window, etc.).
- */
-export function manageWindow(winModel: AbstractWindow): ManagedWindow {
-  const id = winModel.id;
-  if (managedWindows.has(id)) return managedWindows.get(id)!;
+export class SampleWindowManager implements IWindowManager {
+  static readonly [IS_COMPONENT] = true;
 
-  const zIndex = (currentBaseZIndex += 10);
-  const geom = winModel.geometry ?? { x: 100, y: 100, width: 640, height: 480 };
+  private managedWindows = new Map<string, ManagedWindow>();
+  private currentBaseZIndex = 100;
+  private workspaceElement: HTMLElement;
 
-  let hostElement: HTMLElement | undefined = undefined;
-  let titlebarText: HTMLElement | undefined = undefined;
-
-  if (typeof document !== "undefined") {
-    try {
-      hostElement = document.createElement("div");
-      hostElement.className = "cathodique-toplevel";
-      hostElement.style.position = "absolute";
-      hostElement.style.left = `${geom.x}px`;
-      hostElement.style.top = `${geom.y}px`;
-      hostElement.style.width = `${geom.width}px`;
-      hostElement.style.height = `${geom.height}px`;
-      hostElement.style.zIndex = zIndex.toString();
-      hostElement.style.display = "flex";
-      hostElement.style.flexDirection = "column";
-      hostElement.style.background = "#1e1e2e";
-      hostElement.style.color = "#cdd6f4";
-      hostElement.style.borderRadius = "8px";
-      hostElement.style.boxShadow = "0 10px 30px rgba(0,0,0,0.5)";
-      hostElement.style.border = "1px solid rgba(255,255,255,0.1)";
-      hostElement.style.overflow = "hidden";
-      hostElement.style.pointerEvents = "auto";
-
-      // Focus window model on user click
-      hostElement.addEventListener("mousedown", () => {
-        winModel.focus();
-        hostElement!.style.zIndex = (currentBaseZIndex += 10).toString();
-      });
-
-      const titlebar = document.createElement("div");
-      titlebar.className = "titlebar";
-      titlebar.style.height = "32px";
-      titlebar.style.background = "#181825";
-      titlebar.style.display = "flex";
-      titlebar.style.alignItems = "center";
-      titlebar.style.justifyContent = "space-between";
-      titlebar.style.padding = "0 12px";
-      titlebar.style.fontSize = "13px";
-      titlebar.style.fontWeight = "600";
-      titlebar.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
-      titlebar.style.cursor = "move";
-
-      titlebarText = document.createElement("span");
-      titlebarText.className = "titlebar-text";
-      titlebarText.textContent = winModel.title ?? "Untitled";
-      titlebar.appendChild(titlebarText);
-
-      // Titlebar buttons
-      const btnContainer = document.createElement("div");
-      btnContainer.style.display = "flex";
-      btnContainer.style.gap = "6px";
-
-      const closeBtn = document.createElement("button");
-      closeBtn.textContent = "×";
-      closeBtn.style.background = "rgba(235, 77, 75, 0.2)";
-      closeBtn.style.color = "#ff7675";
-      closeBtn.style.border = "none";
-      closeBtn.style.borderRadius = "4px";
-      closeBtn.style.width = "18px";
-      closeBtn.style.height = "18px";
-      closeBtn.style.cursor = "pointer";
-      closeBtn.style.display = "flex";
-      closeBtn.style.alignItems = "center";
-      closeBtn.style.justifyContent = "center";
-
-      closeBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        winModel.close();
-      });
-      btnContainer.appendChild(closeBtn);
-      titlebar.appendChild(btnContainer);
-
-      // Dragging to move window
-      let isDragging = false;
-      let dragStartX = 0;
-      let dragStartY = 0;
-      let initialLeft = geom.x;
-      let initialTop = geom.y;
-
-      titlebar.addEventListener("mousedown", (e) => {
-        isDragging = true;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
-        initialLeft = parseInt(hostElement!.style.left, 10) || geom.x;
-        initialTop = parseInt(hostElement!.style.top, 10) || geom.y;
-
-        const onMouseMove = (moveEvent: MouseEvent) => {
-          if (!isDragging || !hostElement) return;
-          const dx = moveEvent.clientX - dragStartX;
-          const dy = moveEvent.clientY - dragStartY;
-          const newX = initialLeft + dx;
-          const newY = initialTop + dy;
-          hostElement.style.left = `${newX}px`;
-          hostElement.style.top = `${newY}px`;
-          winModel.geometry = { ...winModel.geometry, x: newX, y: newY };
-        };
-
-        const onMouseUp = () => {
-          isDragging = false;
-          window.removeEventListener("mousemove", onMouseMove);
-          window.removeEventListener("mouseup", onMouseUp);
-        };
-
-        window.addEventListener("mousemove", onMouseMove);
-        window.addEventListener("mouseup", onMouseUp);
-      });
-
-      hostElement.appendChild(titlebar);
-
-      const body = document.createElement("div");
-      body.className = "window-body";
-      body.style.flex = "1";
-      body.style.padding = "16px";
-      body.textContent = `Window Content for ${winModel.title}`;
-      hostElement.appendChild(body);
-
-      const ws = getWorkspaceElement();
-      if (ws) ws.appendChild(hostElement);
-    } catch {}
+  constructor() {
+    this.workspaceElement = this.createWorkspace();
   }
 
-  const managed: ManagedWindow = {
-    id,
-    window: winModel,
-    hostElement,
-    zIndex,
-  };
+  private createWorkspace(): HTMLElement {
+    const ws = document.createElement("div");
+    ws.className = "cathodique-workspace";
+    ws.style.position = "absolute";
+    ws.style.inset = "0";
+    ws.style.width = "100%";
+    ws.style.height = "100%";
+    ws.style.overflow = "hidden";
+    ws.style.pointerEvents = "auto";
+    return ws;
+  }
 
-  // Informa reactive subscriptions on the abstract window
-  const unsubTitle = $.onSet(() => winModel.title, (newTitle: string) => {
-    if (titlebarText && typeof newTitle === "string") {
-      titlebarText.textContent = newTitle;
+  public getWorkspaceElement(): HTMLElement {
+    return this.workspaceElement;
+  }
+
+  public manageWindow(targetWindow: AbstractWindow): ManagedWindow {
+    const existing = this.managedWindows.get(targetWindow.id);
+    if (existing) return existing;
+
+    const z = this.currentBaseZIndex++;
+    const host = document.createElement("div");
+    host.className = `window-frame window-${targetWindow.id}`;
+    host.style.position = "absolute";
+    host.style.left = `${targetWindow.geometry.x || 100}px`;
+    host.style.top = `${targetWindow.geometry.y || 80}px`;
+    host.style.width = `${targetWindow.geometry.width || 640}px`;
+    host.style.height = `${targetWindow.geometry.height || 420}px`;
+    host.style.zIndex = `${z}`;
+    host.style.pointerEvents = "auto";
+    host.style.backgroundColor = "rgba(26, 27, 38, 0.92)";
+    host.style.backdropFilter = "blur(16px)";
+    host.style.borderRadius = "10px";
+    host.style.boxShadow = "0 12px 40px rgba(0, 0, 0, 0.5)";
+    host.style.border = "1px solid rgba(255, 255, 255, 0.1)";
+    host.style.overflow = "hidden";
+    host.style.display = "flex";
+    host.style.flexDirection = "column";
+
+    // Window Titlebar
+    const titleBar = document.createElement("div");
+    titleBar.className = "window-titlebar";
+    titleBar.style.height = "34px";
+    titleBar.style.backgroundColor = "rgba(255, 255, 255, 0.05)";
+    titleBar.style.borderBottom = "1px solid rgba(255, 255, 255, 0.08)";
+    titleBar.style.display = "flex";
+    titleBar.style.alignItems = "center";
+    titleBar.style.justifyContent = "space-between";
+    titleBar.style.padding = "0 12px";
+    titleBar.style.userSelect = "none";
+    titleBar.style.cursor = "grab";
+
+    const titleText = document.createElement("span");
+    titleText.className = "window-title-text";
+    titleText.textContent = targetWindow.title || "Window";
+    titleText.style.color = "#e0e0e0";
+    titleText.style.fontSize = "13px";
+    titleText.style.fontWeight = "500";
+    titleText.style.fontFamily = "system-ui, -apple-system, sans-serif";
+    titleBar.appendChild(titleText);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "✕";
+    closeBtn.style.background = "transparent";
+    closeBtn.style.border = "none";
+    closeBtn.style.color = "#888";
+    closeBtn.style.fontSize = "14px";
+    closeBtn.style.cursor = "pointer";
+    closeBtn.style.padding = "2px 6px";
+    closeBtn.style.borderRadius = "4px";
+    closeBtn.onmouseenter = () => { closeBtn.style.color = "#ff5555"; };
+    closeBtn.onmouseleave = () => { closeBtn.style.color = "#888"; };
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      targetWindow.close();
+    };
+    titleBar.appendChild(closeBtn);
+
+    const bringToFront = () => {
+      const newZ = this.currentBaseZIndex++;
+      host.style.zIndex = `${newZ}`;
+      const entry = this.managedWindows.get(targetWindow.id);
+      if (entry) entry.zIndex = newZ;
+      targetWindow.focus();
+    };
+
+    // Titlebar Dragging via GlobalIO
+    titleBar.addEventListener("mousedown", (e: MouseEvent) => {
+      if (e.target === closeBtn) return;
+      e.preventDefault();
+
+      bringToFront();
+
+      titleBar.style.cursor = "grabbing";
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initialWinX = targetWindow.geometry.x ?? host.offsetLeft;
+      const initialWinY = targetWindow.geometry.y ?? host.offsetTop;
+      const doc = host.ownerDocument ?? document;
+
+      const onMouseMove = (moveEvt: MouseEvent) => {
+        const dx = moveEvt.clientX - startX;
+        const dy = moveEvt.clientY - startY;
+        const newX = initialWinX + dx;
+        const newY = initialWinY + dy;
+
+        targetWindow.geometry.x = newX;
+        targetWindow.geometry.y = newY;
+        host.style.left = `${newX}px`;
+        host.style.top = `${newY}px`;
+      };
+
+      doc.addEventListener("mousemove", onMouseMove, true);
+
+      trackMouseRelease(e, () => {
+        titleBar.style.cursor = "grab";
+        doc.removeEventListener("mousemove", onMouseMove, true);
+      });
+    });
+
+    // Bring to front on window click
+    host.addEventListener("mousedown", () => {
+      bringToFront();
+    });
+
+    host.appendChild(titleBar);
+
+    const surfaceContainer = document.createElement("div");
+    surfaceContainer.style.flex = "1";
+    surfaceContainer.style.position = "relative";
+    surfaceContainer.style.overflow = "hidden";
+
+    const surfaceElement = targetWindow.getSurfaceElement?.();
+    if (surfaceElement) {
+      surfaceContainer.appendChild(surfaceElement);
     }
-  });
+    host.appendChild(surfaceContainer);
 
-  const unsubGeom = $.onSet(() => winModel.geometry, (newGeom: WindowGeometry) => {
-    if (hostElement && newGeom) {
-      if (newGeom.x !== undefined) hostElement.style.left = `${newGeom.x}px`;
-      if (newGeom.y !== undefined) hostElement.style.top = `${newGeom.y}px`;
-      if (newGeom.width !== undefined) hostElement.style.width = `${newGeom.width}px`;
-      if (newGeom.height !== undefined) hostElement.style.height = `${newGeom.height}px`;
+    this.workspaceElement.appendChild(host);
+
+    const managed: ManagedWindow = {
+      id: targetWindow.id,
+      window: targetWindow,
+      hostElement: host,
+      zIndex: z,
+    };
+
+    targetWindow.onDestroy(() => {
+      host.remove();
+      this.managedWindows.delete(targetWindow.id);
+    });
+
+    this.managedWindows.set(targetWindow.id, managed);
+    return managed;
+  }
+
+  public unmanageWindow(windowOrId: AbstractWindow | string): void {
+    const id = typeof windowOrId === "string" ? windowOrId : windowOrId.id;
+    const managed = this.managedWindows.get(id);
+    if (managed) {
+      managed.hostElement.remove();
+      this.managedWindows.delete(id);
     }
-  });
-
-  winModel.onDestroy(() => {
-    unsubTitle();
-    unsubGeom();
-    closeWindow(id);
-  });
-
-  managedWindows.set(id, managed);
-  return managed;
-}
-
-export function createWindow(
-  titleOrWindow: string | AbstractWindow,
-  options: { geometry?: Partial<WindowGeometry>; [key: string]: unknown } = {}
-): ManagedWindow {
-  if (titleOrWindow instanceof AbstractWindow || (typeof titleOrWindow === "object" && titleOrWindow !== null && "id" in titleOrWindow)) {
-    return manageWindow(titleOrWindow as AbstractWindow);
   }
-  const win = new GenericDesktopWindow(titleOrWindow as string, options.geometry);
-  return manageWindow(win);
-}
 
-export function closeWindow(id: string): boolean {
-  const managed = managedWindows.get(id);
-  if (!managed) return false;
-  if (managed.hostElement?.parentNode) {
-    managed.hostElement.parentNode.removeChild(managed.hostElement);
+  public getManagedWindows(): ManagedWindow[] {
+    return Array.from(this.managedWindows.values());
   }
-  managedWindows.delete(id);
-  return true;
+
+  public getWindows(): ManagedWindow[] {
+    return this.getManagedWindows();
+  }
 }
 
-export function listWindows(): ManagedWindow[] {
-  return Array.from(managedWindows.values());
-}
-
-export default {
-  createWindow,
-  manageWindow,
-  closeWindow,
-  listWindows,
-  getWorkspaceElement,
-};
+export default SampleWindowManager;

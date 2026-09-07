@@ -2,9 +2,9 @@
   "id": "@cathodique/init",
   "name": "init",
   "version": "1.0.0",
-  "description": "Cathodique Desktop Environment Privileged Bootstrapper & Subsystem Orchestrator",
+  "description": "PID 1 Privileged Orchestration Module for Cathodique DE",
   "main": "index.js",
   "interface": "@cathodique/init-iface",
-  "priority": 1000,
-  "capabilities": ["system:bootstrap", "compartment:orchestrate", "dom:export"]
+  "priority": 0,
+  "capabilities": ["host", "dom", "system", "wayland", "buffer", "cap-buffer", "dmabuf", "cap-dmabuf"]
 }

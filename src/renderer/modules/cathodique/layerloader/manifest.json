@@ -1,11 +1,6 @@
 {
-  "id": "@cathodique/layerloader",
-  "name": "layerloader",
+  "name": "@cathodique/layerloader",
   "version": "1.0.0",
-  "description": "Layer management module for Cathodique compositor with DOM export capability",
-  "main": "index.js",
-  "interface": "@cathodique/layer-iface",
-  "priority": 90,
-  "capabilities": ["dom:export", "dom:render", "layer:create"],
-  "assets": ["assets/"]
+  "implements": "@cathodique/layer-iface",
+  "capabilities": ["dom"]
 }

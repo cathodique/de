@@ -1,0 +1,6 @@
+{
+  "name": "@cathodique/output-manager-iface",
+  "version": "1.0.0",
+  "isInterface": true,
+  "capabilities": []
+}

@@ -1,25 +1,33 @@
 /**
  * Reference Service Module for Cathodique.
+ * Implements @cathodique/service-iface.
  */
 
-let isRunning = false;
+import { IS_COMPONENT } from "@cathodique/init-iface";
+import type { Service as IService } from "@cathodique/service-iface";
 
-export async function start(): Promise<void> {
-  isRunning = true;
-  console.log("[SampleService] Service started.");
+export class SampleService implements IService {
+  static readonly [IS_COMPONENT] = true;
+
+  private isRunning = false;
+
+  public async start(): Promise<void> {
+    this.isRunning = true;
+    console.log("[@cathodique/sample-service] [SampleService] Service started.");
+  }
+
+  public async stop(): Promise<void> {
+    this.isRunning = false;
+    console.log("[@cathodique/sample-service] [SampleService] Service stopped.");
+  }
+
+  public status(): "running" | "stopped" | "error" {
+    return this.isRunning ? "running" : "stopped";
+  }
 }
 
-export async function stop(): Promise<void> {
-  isRunning = false;
-  console.log("[SampleService] Service stopped.");
+export function createService(): SampleService {
+  return new SampleService();
 }
 
-export function status(): "running" | "stopped" | "error" {
-  return isRunning ? "running" : "stopped";
-}
-
-export default {
-  start,
-  stop,
-  status,
-};
+export default SampleService;

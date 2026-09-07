@@ -2,9 +2,12 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import rawArgv from "@cathodique/simple-argv";
 import { rmSync } from "node:fs";
 import { registerProtocols } from "./protocols.js";
+import { setupDmabufBridge, type DmabufBridgeServer } from "./dmabuf-bridge.js";
 
 const argv = (rawArgv as any)?.default ?? rawArgv ?? {};
 const deleteQueue: string[] = [];
+let mainWindow: BrowserWindow | null = null;
+let dmabufBridge: DmabufBridgeServer | null = null;
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -15,6 +18,7 @@ const createWindow = () => {
     },
   });
 
+  mainWindow = win;
   win.webContents.openDevTools({ mode: "detach" });
   const qs = Object.keys(argv).length ? `?${new URLSearchParams(argv).toString()}` : "";
   win.loadURL(`app://top/index.html${qs}`);
@@ -22,6 +26,8 @@ const createWindow = () => {
 
 app.whenReady().then(() => {
   registerProtocols();
+
+  dmabufBridge = setupDmabufBridge(() => mainWindow);
 
   ipcMain.on("addToDeleteQueue", (_, arg1: string) => {
     if (typeof arg1 === "string" && !deleteQueue.includes(arg1)) {
@@ -33,11 +39,28 @@ app.whenReady().then(() => {
 });
 
 function handleClose() {
-  for (const file of deleteQueue) {
-    if (!file.match(/^\/run\/user\/\d+\/wayland-\d+(.lock)?$/)) continue;
+  if (dmabufBridge) {
     try {
-      rmSync(file, { force: true });
+      dmabufBridge.close();
     } catch {}
+  }
+
+  const xdgDir = process.env.XDG_RUNTIME_DIR;
+
+  for (const file of deleteQueue) {
+    const isWaylandSocket =
+      file.includes("wayland-") ||
+      (xdgDir && file.startsWith(xdgDir)) ||
+      file.match(/\/wayland-\d+(\.lock)?$/);
+
+    if (isWaylandSocket) {
+      try {
+        rmSync(file, { force: true });
+      } catch {}
+      try {
+        rmSync(`${file}.lock`, { force: true });
+      } catch {}
+    }
   }
 }
 
