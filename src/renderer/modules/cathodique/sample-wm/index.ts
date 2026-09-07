@@ -7,8 +7,8 @@
 import $ from "informa";
 import { AbstractWindow, type WindowGeometry } from "@cathodique/window-iface";
 import { IS_COMPONENT } from "@cathodique/init-iface";
-import type { WindowManager as IWindowManager, ManagedWindow } from "@cathodique/wm-iface";
 import { trackMouseRelease } from "@cathodique/global-io";
+import type { WindowManager as IWindowManager, ManagedWindow } from "@cathodique/wm-iface";
 
 export { ManagedWindow };
 
@@ -171,6 +171,7 @@ export class SampleWindowManager implements IWindowManager {
     // Titlebar Dragging via GlobalIO
     titleBar.addEventListener("mousedown", (e: MouseEvent) => {
       if (e.target === closeBtn) return;
+      if (e.button !== 0) return;
       e.preventDefault();
 
       bringToFront();
@@ -180,7 +181,6 @@ export class SampleWindowManager implements IWindowManager {
       const startY = e.clientY;
       const initialWinX = targetWindow.geometry.x ?? host.offsetLeft;
       const initialWinY = targetWindow.geometry.y ?? host.offsetTop;
-      const doc = host.ownerDocument ?? document;
 
       const onMouseMove = (moveEvt: MouseEvent) => {
         const dx = moveEvt.clientX - startX;
@@ -194,11 +194,11 @@ export class SampleWindowManager implements IWindowManager {
         host.style.top = `${newY}px`;
       };
 
-      doc.addEventListener("mousemove", onMouseMove, true);
+      this.workspaceElement.addEventListener("mousemove", onMouseMove, true);
 
       trackMouseRelease(e, () => {
         titleBar.style.cursor = "grab";
-        doc.removeEventListener("mousemove", onMouseMove, true);
+        this.workspaceElement.removeEventListener("mousemove", onMouseMove, true);
       });
     });
 

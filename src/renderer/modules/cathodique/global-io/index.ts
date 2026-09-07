@@ -1,21 +1,22 @@
 /**
- * Cathodique Global I/O Module (@cathodique/global-io).
- * Tracks global keyboard modifiers and provides mouse release tracking across window boundaries.
+ * Cathodique Global I/O Tracking Module (@cathodique/global-io).
+ * Tracks global pointer buttons and keyboard modifiers.
+ * Implements @cathodique/global-io-iface.
  */
 
 import $ from "informa";
-import type { ModifiersState, IGlobalIO } from "@cathodique/global-io-iface";
 import { IS_COMPONENT } from "@cathodique/init-iface";
+import type { GlobalIO as IGlobalIO, ModifiersState } from "@cathodique/global-io-iface";
 
 export { ModifiersState };
 
-// Standard XKB modifier bitmasks for Wayland seats
-const MOD_SHIFT = 1 << 0;
-const MOD_CAPS = 1 << 1;
-const MOD_CTRL = 1 << 2;
-const MOD_ALT = 1 << 3;
-const MOD_NUM = 1 << 4;
-const MOD_META = 1 << 6;
+// Linux input event modifier bitmasks
+export const MOD_SHIFT = 1 << 0;
+export const MOD_CAPS = 1 << 1;
+export const MOD_CTRL = 1 << 2;
+export const MOD_ALT = 1 << 3;
+export const MOD_NUM = 1 << 4;
+export const MOD_META = 1 << 6;
 
 class BaseModifiersState implements ModifiersState {
   public shift = false;
@@ -48,20 +49,42 @@ export class GlobalIO implements IGlobalIO {
     if (this.active) return;
     this.active = true;
 
-    window.addEventListener("keydown", this.handleKeyEvent, true);
-    window.addEventListener("keyup", this.handleKeyEvent, true);
-    window.addEventListener("mouseup", this.handleMouseUp, true);
-    window.addEventListener("pointerup", this.handleMouseUp, true);
+    const doc = typeof document !== "undefined" ? document : null;
+    const domWin = doc?.defaultView ?? (typeof window !== "undefined" ? window : null);
+
+    if (doc) {
+      doc.addEventListener("keydown", this.handleKeyEvent, true);
+      doc.addEventListener("keyup", this.handleKeyEvent, true);
+      doc.addEventListener("mouseup", this.handleMouseUp, true);
+      doc.addEventListener("pointerup", this.handleMouseUp, true);
+    }
+    if (domWin && domWin !== (doc as any)) {
+      domWin.addEventListener("keydown", this.handleKeyEvent, true);
+      domWin.addEventListener("keyup", this.handleKeyEvent, true);
+      domWin.addEventListener("mouseup", this.handleMouseUp, true);
+      domWin.addEventListener("pointerup", this.handleMouseUp, true);
+    }
   }
 
   public stop(): void {
     if (!this.active) return;
     this.active = false;
 
-    window.removeEventListener("keydown", this.handleKeyEvent, true);
-    window.removeEventListener("keyup", this.handleKeyEvent, true);
-    window.removeEventListener("mouseup", this.handleMouseUp, true);
-    window.removeEventListener("pointerup", this.handleMouseUp, true);
+    const doc = typeof document !== "undefined" ? document : null;
+    const domWin = doc?.defaultView ?? (typeof window !== "undefined" ? window : null);
+
+    if (doc) {
+      doc.removeEventListener("keydown", this.handleKeyEvent, true);
+      doc.removeEventListener("keyup", this.handleKeyEvent, true);
+      doc.removeEventListener("mouseup", this.handleMouseUp, true);
+      doc.removeEventListener("pointerup", this.handleMouseUp, true);
+    }
+    if (domWin && domWin !== (doc as any)) {
+      domWin.removeEventListener("keydown", this.handleKeyEvent, true);
+      domWin.removeEventListener("keyup", this.handleKeyEvent, true);
+      domWin.removeEventListener("mouseup", this.handleMouseUp, true);
+      domWin.removeEventListener("pointerup", this.handleMouseUp, true);
+    }
   }
 
   private handleKeyEvent = (e: KeyboardEvent): void => {
